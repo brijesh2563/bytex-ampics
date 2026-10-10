@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 
 /**
  * Observatory Instrument Preloader.
@@ -36,14 +36,25 @@ export function Preloader({ onComplete }) {
     };
   }, [visible, onComplete]);
 
-  const handleSkip = () => {
+  const handleSkip = useCallback(() => {
     setWiping(true);
     setTimeout(() => {
       setVisible(false);
       sessionStorage.setItem('nexussync_preloader_seen', 'true');
       onComplete?.();
     }, 200);
-  };
+  }, [onComplete]);
+
+  useEffect(() => {
+    if (!visible) return;
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        handleSkip();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [visible, handleSkip]);
 
   if (!visible) return null;
 
