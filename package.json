@@ -10,9 +10,11 @@
     "preview": "vite preview",
     "server:dev": "npm --prefix server run dev",
     "server:build": "npm --prefix server run build",
+    "server:start": "npm --prefix server start",
     "server:test": "npm --prefix server test",
     "shared:test": "npm --prefix packages/shared test",
-    "test:all": "npm --prefix packages/shared test && npm --prefix server test"
+    "test:all": "npm --prefix packages/shared test && npm --prefix server test",
+    "start": "npm --prefix server start"
   },
   "dependencies": {
     "idb": "^8.0.4",

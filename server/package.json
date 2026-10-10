@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "tsx watch src/server.ts",
     "build": "tsc",
-    "start": "node dist/server.js",
+    "start": "tsx src/server.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },
@@ -15,7 +15,8 @@
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
-    "socket.io": "^4.8.1"
+    "socket.io": "^4.8.1",
+    "tsx": "^4.19.2"
   },
   "devDependencies": {
     "@types/cors": "^2.8.17",
@@ -24,7 +25,6 @@
     "@types/supertest": "^6.0.2",
     "socket.io-client": "^4.8.4",
     "supertest": "^7.0.0",
-    "tsx": "^4.19.2",
     "typescript": "^5.8.0",
     "vitest": "^3.0.0"
   }

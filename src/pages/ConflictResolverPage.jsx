@@ -6,7 +6,13 @@ import {
   Sliders,
   CheckCircle2,
   FileCheck,
-  Edit3
+  Edit3,
+  Sparkles,
+  Bot,
+  AlertTriangle,
+  Loader2,
+  Check,
+  ShieldCheck
 } from 'lucide-react';
 
 export function ConflictResolverPage() {
@@ -18,7 +24,13 @@ export function ConflictResolverPage() {
     setSutureSelection,
     resolveConflict,
     resolvedConflicts,
+    requestConflictAdvice,
+    adoptAdvisorSuggestion,
+    advisorLoading,
+    advisorError,
+    advisorAnalysis,
   } = useSyncStore();
+
 
   const [resolutionSuccess, setResolutionSuccess] = useState(false);
 
@@ -112,11 +124,11 @@ export function ConflictResolverPage() {
                     FORK DETECTED
                   </span>
                   <span className="font-display text-xl text-[var(--ink)] font-semibold">
-                    Concurrent edit on Due Date &amp; Priority for: "{activeConflict.title}"
+                    Concurrent edit on field '{activeConflict.field || 'title'}' for: "{activeConflict.title}"
                   </span>
                 </div>
                 <p className="font-newsreader text-sm text-[var(--ink-soft)]">
-                  Semantic Context: Replica A rescheduled to <strong className="text-[var(--copper)]">Nov 04</strong> while Replica B marked <strong className="text-[var(--ochre)]">Nov 19</strong> with an unlinked blocking dependency.
+                  Semantic Context: Replica A updated to <strong className="text-[var(--copper)]">{JSON.stringify(activeConflict.branchA?.value ?? activeConflict.branchA?.title)}</strong> while Replica B updated to <strong className="text-[var(--ochre)]">{JSON.stringify(activeConflict.branchB?.value ?? activeConflict.branchB?.title)}</strong>.
                 </p>
               </div>
             </div>
@@ -295,6 +307,167 @@ export function ConflictResolverPage() {
                 </div>
               </div>
             </div>
+          </div>
+
+
+
+          {/* 4.5. OLLAMA CLOUD AI CONFLICT ADVISOR STUDIO */}
+          <div className="bg-[var(--paper-raised)] border-2 border-[var(--copper)]/30 rounded-xl p-6 shadow-xs space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-[var(--line)] pb-4">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-lg bg-[var(--copper)]/15 text-[var(--copper)] flex items-center justify-center shrink-0 border border-[var(--copper)]/30">
+                  <Sparkles className="w-5 h-5" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="font-mono text-[10px] uppercase tracking-wider text-[var(--copper)] font-bold">
+                      OLLAMA CLOUD · AI ADVISOR
+                    </span>
+                    <span className="px-1.5 py-0.2 rounded bg-[var(--paper)] border border-[var(--border)] font-mono text-[9px] text-[var(--ink-soft)]">
+                      gemma4:cloud
+                    </span>
+                  </div>
+                  <h3 className="font-display text-xl text-[var(--ink)]">
+                    Causal Branch Intelligence
+                  </h3>
+                </div>
+              </div>
+
+              <button
+                onClick={() => requestConflictAdvice(activeConflict.conflictId || activeConflict.id)}
+                disabled={advisorLoading}
+                className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[var(--paper)] hover:bg-[var(--paper-sunken)] border border-[var(--copper)]/40 text-[var(--copper)] hover:text-[var(--copper-deep)] font-mono text-xs font-bold uppercase tracking-wider transition shadow-2xs cursor-pointer disabled:opacity-50"
+              >
+                {advisorLoading ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    <span>Analyzing Causal Vectors...</span>
+                  </>
+                ) : (
+                  <>
+                    <Bot className="w-3.5 h-3.5" />
+                    <span>{advisorAnalysis ? 'Re-Analyze with AI' : 'Consult AI Conflict Advisor'}</span>
+                  </>
+                )}
+              </button>
+            </div>
+
+            {/* Error Notification */}
+            {advisorError && (
+              <div className="p-3.5 rounded-lg bg-[var(--ochre)]/10 border border-[var(--ochre)]/30 text-[var(--ink)] font-mono text-xs flex items-start gap-2.5">
+                <AlertTriangle className="w-4 h-4 text-[var(--ochre)] shrink-0 mt-0.5" />
+                <div>
+                  <span className="font-bold text-[var(--ochre)]">Advisor Advisory: </span>
+                  <span>{advisorError}</span>
+                  <span className="block text-[10px] text-[var(--ink-soft)] mt-0.5">
+                    Manual deterministic resolution remains 100% available below.
+                  </span>
+                </div>
+              </div>
+            )}
+
+            {/* Analysis Content */}
+            {advisorAnalysis ? (
+              <div className="space-y-4 animate-in fade-in duration-200">
+                {/* Explanation */}
+                <div className="p-4 rounded-lg bg-[var(--paper)] border border-[var(--border)]">
+                  <span className="font-mono text-[9px] uppercase tracking-wider text-[var(--copper)] font-bold block mb-1">
+                    Causal Divergence Explanation
+                  </span>
+                  <p className="font-newsreader text-sm sm:text-base text-[var(--ink)] leading-relaxed">
+                    {advisorAnalysis.explanation}
+                  </p>
+                </div>
+
+                {/* Suggestions Grid */}
+                <div className="space-y-2">
+                  <span className="font-mono text-[9px] uppercase tracking-wider text-[var(--ink-faint)] font-bold block">
+                    Model Recommended Strategies ({advisorAnalysis.suggestions?.length || 0})
+                  </span>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    {advisorAnalysis.suggestions?.map((sug, idx) => {
+                      const isChosen =
+                        (sug.strategy === 'CHOOSE_A' && resolutionStrategy === 'lww') ||
+                        (sug.strategy === 'CHOOSE_B' && resolutionStrategy === 'mvr') ||
+                        (sug.strategy === 'MERGE_CUSTOM' && resolutionStrategy === 'suture');
+                      return (
+                        <div
+                          key={idx}
+                          className={`p-3.5 rounded-lg border transition-all space-y-2 flex flex-col justify-between ${
+                            isChosen
+                              ? 'bg-[var(--copper)]/10 border-[var(--copper)]'
+                              : 'bg-[var(--paper)] border-[var(--border)] hover:border-[var(--copper)]/40'
+                          }`}
+                        >
+                          <div className="space-y-1.5">
+                            <div className="flex items-center justify-between">
+                              <span className="px-2 py-0.5 rounded font-mono text-[10px] font-bold uppercase bg-[var(--paper-raised)] border border-[var(--border)] text-[var(--copper)]">
+                                {sug.strategy}
+                              </span>
+                              <span className="font-mono text-[10px] text-[var(--verdigris)] font-bold">
+                                {Math.round((sug.confidence || 0.8) * 100)}% Confidence
+                              </span>
+                            </div>
+                            <div className="font-mono text-xs font-semibold text-[var(--ink)]">
+                              Target Value: <span className="text-[var(--copper)]">{JSON.stringify(sug.suggestedValue)}</span>
+                            </div>
+                            <p className="font-newsreader text-xs text-[var(--ink-soft)] leading-snug">
+                              {sug.rationale}
+                            </p>
+                          </div>
+
+                          <button
+                            onClick={() => adoptAdvisorSuggestion(sug)}
+                            className={`w-full py-1.5 px-3 rounded font-mono text-xs uppercase tracking-wider font-bold flex items-center justify-center gap-1.5 transition cursor-pointer ${
+                              isChosen
+                                ? 'bg-[var(--copper)] text-[var(--paper-raised)]'
+                                : 'bg-[var(--paper-raised)] hover:bg-[var(--border)] text-[var(--ink)] border border-[var(--border)]'
+                            }`}
+                          >
+                            {isChosen ? (
+                              <>
+                                <Check className="w-3.5 h-3.5" />
+                                <span>Adopted Active</span>
+                              </>
+                            ) : (
+                              <span>Adopt Recommendation</span>
+                            )}
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Risks Identified */}
+                {advisorAnalysis.risks?.length > 0 && (
+                  <div className="p-3 rounded-lg bg-[var(--paper-sunken)] border border-[var(--border)] font-mono text-xs text-[var(--ink-soft)] space-y-1">
+                    <span className="text-[9px] uppercase tracking-wider text-[var(--ochre)] font-bold block">
+                      Invariant &amp; Downstream Hazards Identified:
+                    </span>
+                    <ul className="list-disc list-inside space-y-0.5 text-[11px]">
+                      {advisorAnalysis.risks.map((r, i) => (
+                        <li key={i}>{r}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {/* Authoritative Invariant Guarantee */}
+                <div className="flex items-center gap-2 font-mono text-[10px] text-[var(--ink-faint)] pt-1 border-t border-[var(--line)]">
+                  <ShieldCheck className="w-3.5 h-3.5 text-[var(--verdigris)] shrink-0" />
+                  <span>
+                    Advisory Isolation Invariant: requiresHumanApproval=true. Authoritative SQLite records remain unmutated until you click Commit below.
+                  </span>
+                </div>
+              </div>
+            ) : (
+              !advisorLoading && (
+                <p className="font-newsreader text-xs text-[var(--ink-soft)] italic">
+                  Click &quot;Consult AI Conflict Advisor&quot; to dispatch an isolated analysis request to Ollama Cloud. The model will evaluate semantic divergence, suggest mathematically safe join strategies, and flag domain hazards without touching database records.
+                </p>
+              )
+            )}
           </div>
 
           {/* 5. RESOLUTION ACTION DECK / STRATEGY SELECTOR */}

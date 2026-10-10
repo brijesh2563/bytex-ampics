@@ -324,23 +324,29 @@ export function ConvergenceLabPage() {
               <span className="text-[var(--ink-faint)] text-[9px]">{chaosEvents.length} Recent Log Traces</span>
             </div>
 
-            <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
-              {chaosEvents.map((ev) => (
-                <div
-                  key={ev.id}
-                  className="p-2 rounded bg-[var(--paper)] border border-[var(--border)] flex items-start justify-between gap-3 text-[11px]"
-                >
-                  <div className="space-y-0.5">
-                    <div className="flex items-center gap-2">
-                      <span className="text-[var(--ink-faint)] text-[9px]">{ev.time}</span>
-                      <span className="font-bold text-[var(--copper)] text-[10px]">{ev.type}</span>
+            {chaosEvents.length > 0 ? (
+              <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+                {chaosEvents.map((ev) => (
+                  <div
+                    key={ev.id}
+                    className="p-2 rounded bg-[var(--paper)] border border-[var(--border)] flex items-start justify-between gap-3 text-[11px]"
+                  >
+                    <div className="space-y-0.5">
+                      <div className="flex items-center gap-2">
+                        <span className="text-[var(--ink-faint)] text-[9px]">{ev.time}</span>
+                        <span className="font-bold text-[var(--copper)] text-[10px]">{ev.type}</span>
+                      </div>
+                      <p className="text-[var(--ink)] font-sans text-xs">{ev.desc}</p>
                     </div>
-                    <p className="text-[var(--ink)] font-sans text-xs">{ev.desc}</p>
+                    <span className="text-[var(--ink-faint)] text-[10px] shrink-0">L#{ev.lamport}</span>
                   </div>
-                  <span className="text-[var(--ink-faint)] text-[10px] shrink-0">L#{ev.lamport}</span>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            ) : (
+              <div className="p-4 text-center text-[var(--ink-faint)] text-[11px] bg-[var(--paper)] rounded border border-dashed border-[var(--border)]">
+                No artificial faults injected yet. Toggle fault flags or partition a node to log telemetry.
+              </div>
+            )}
           </div>
         </div>
       </section>

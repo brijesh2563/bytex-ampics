@@ -102,13 +102,25 @@
  */
 
 /**
- * Authoritative Socket.IO Event Names from docs/ARCHITECTURE.md
+ * Authoritative Socket.IO Event Names from @nexussync/shared (packages/shared/src/events.ts)
  */
 export const SYNC_EVENTS = Object.freeze({
-  HANDSHAKE: 'sync:handshake',
-  HANDSHAKE_ACK: 'sync:handshake_ack',
-  PUSH_OPS: 'sync:push_ops',
-  OP_COMMITTED: 'sync:op_committed',
-  CONFLICT_RAISED: 'sync:conflict_raised',
-  RESOLVE_CONFLICT: 'sync:resolve_conflict',
+  // Authoritative Socket.IO Events
+  CLIENT_HANDSHAKE: 'client:handshake',
+  CLIENT_PUSH_OPS: 'client:push-ops',
+  CLIENT_RESOLVE_CONFLICT: 'client:resolve-conflict',
+  SERVER_CATCHUP: 'server:catchup',
+  SERVER_ACK_OPS: 'server:ack-ops',
+  SERVER_BROADCAST_OPS: 'server:broadcast-ops',
+  SERVER_CONFLICT_DETECTED: 'server:conflict-detected',
+  SERVER_CONFLICT_RESOLVED: 'server:conflict-resolved',
+  SERVER_ERROR: 'server:error',
+
+  // Aliases for compatibility
+  HANDSHAKE: 'client:handshake',
+  HANDSHAKE_ACK: 'server:catchup',
+  PUSH_OPS: 'client:push-ops',
+  OP_COMMITTED: 'server:ack-ops',
+  CONFLICT_RAISED: 'server:conflict-detected',
+  RESOLVE_CONFLICT: 'client:resolve-conflict',
 });

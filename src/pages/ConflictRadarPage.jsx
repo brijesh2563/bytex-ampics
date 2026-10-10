@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 
 export function ConflictRadarPage() {
-  const { conflicts, setActivePage } = useSyncStore();
+  const { conflicts, resolvedConflicts, setActivePage } = useSyncStore();
 
   return (
     <div className="flex flex-col gap-8 w-full animate-in fade-in duration-300">
@@ -77,7 +77,7 @@ export function ConflictRadarPage() {
             </span>
           </div>
           <div className="flex items-baseline gap-2">
-            <span className="font-display text-4xl text-[var(--verdigris)] font-bold leading-none">24</span>
+            <span className="font-display text-4xl text-[var(--verdigris)] font-bold leading-none">{resolvedConflicts?.length || 0}</span>
             <span className="text-[10px] text-[var(--ink-soft)] uppercase">LUB MERGES</span>
           </div>
           <div className="flex justify-between text-[10px] text-[var(--ink-soft)] border-t border-[var(--line)] pt-2">
@@ -165,31 +165,39 @@ export function ConflictRadarPage() {
               {/* Central Observation Hub */}
               <circle cx="150" cy="150" r="6" fill="var(--copper)" />
 
-              {/* Anomaly Blip 1: Task #204 Collision (Ochre) */}
-              <g className="cursor-pointer">
-                <circle cx="210" cy="110" r="7" fill="var(--ochre)" className="animate-pulse" />
-                <circle cx="210" cy="110" r="14" fill="none" stroke="var(--ochre)" strokeWidth="1" opacity="0.5" />
-                <text x="210" y="95" textAnchor="middle" className="font-mono text-[8px] fill-[var(--ochre)] font-bold">
-                  #204 FORK (Δ+1)
-                </text>
-              </g>
+              {/* Dynamic Anomaly Blip for Active Conflicts */}
+              {conflicts.map((c, i) => {
+                const cx = 190 + ((i * 35) % 60);
+                const cy = 100 + ((i * 45) % 70);
+                return (
+                  <g key={c.id || i} className="cursor-pointer" onClick={() => setActivePage('conflicts')}>
+                    <circle cx={cx} cy={cy} r="7" fill="var(--ochre)" className="animate-pulse" />
+                    <circle cx={cx} cy={cy} r="14" fill="none" stroke="var(--ochre)" strokeWidth="1" opacity="0.5" />
+                    <text x={cx} y={cy - 12} textAnchor="middle" className="font-mono text-[8px] fill-[var(--ochre)] font-bold">
+                      #{String(c.conflictId || c.id).slice(-4)} FORK
+                    </text>
+                  </g>
+                );
+              })}
 
               {/* Converged Node Blips */}
               <circle cx="90" cy="90" r="5" fill="var(--verdigris)" />
               <text x="90" y="78" textAnchor="middle" className="font-mono text-[7px] fill-[var(--verdigris)]">
-                #101 SYNC
+                REPLICA A
               </text>
 
               <circle cx="220" cy="200" r="5" fill="var(--verdigris)" />
               <text x="220" y="215" textAnchor="middle" className="font-mono text-[7px] fill-[var(--verdigris)]">
-                #202 SYNC
+                REPLICA B
               </text>
             </svg>
           </div>
 
           <div className="flex justify-between items-center font-mono text-[10px] text-[var(--ink-soft)] px-1">
             <span>POLAR RESOLUTION: 0.12°</span>
-            <span className="text-[var(--ochre)] font-bold">1 FORK IN APERTURE</span>
+            <span className="text-[var(--ochre)] font-bold">
+              {conflicts.length} FORK{conflicts.length === 1 ? '' : 'S'} IN APERTURE
+            </span>
           </div>
         </div>
 
@@ -226,7 +234,7 @@ export function ConflictRadarPage() {
                         </span>
                       </div>
                       <p className="text-[11px] text-[var(--ink-soft)] font-newsreader">
-                        Due Date collision: Nov 04 (Replica A) vs Nov 19 (Replica B).
+                        Field '{c.field}' collision: {JSON.stringify(c.branchA?.value)} (Replica A) vs {JSON.stringify(c.branchB?.value)} (Replica B).
                       </p>
                     </div>
                   </div>

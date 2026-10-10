@@ -9,6 +9,7 @@ const __dirname = path.dirname(__filename);
 
 export interface ServerConfig {
   port: number;
+  host: string;
   nodeEnv: string;
   dbPath: string;
   corsOrigin: string | string[];
@@ -24,9 +25,10 @@ const defaultDbPath = path.resolve(__dirname, '../../data/nexussync.db');
 
 export const config: ServerConfig = {
   port: Number.parseInt(process.env.PORT || '4000', 10),
+  host: process.env.HOST || '0.0.0.0',
   nodeEnv: process.env.NODE_ENV || 'development',
   dbPath: process.env.DB_PATH || defaultDbPath,
-  corsOrigin: process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(',') : '*',
+  corsOrigin: process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(',').map((o) => o.trim()) : '*',
   serviceName: 'NexusSync Sync Coordinator',
   version: '0.1.0',
   ollamaBaseUrl: process.env.OLLAMA_BASE_URL || 'https://ollama.com',

@@ -77,8 +77,9 @@ export function startServer(): Promise<{
     try {
       const { httpServer, io } = createServer();
       const port = config.port;
+      const host = config.host;
 
-      httpServer.listen(port, () => {
+      httpServer.listen(port, host, () => {
         resolve({ httpServer, io, port });
       });
 
