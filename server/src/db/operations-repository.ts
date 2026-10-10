@@ -223,6 +223,26 @@ export class OperationsRepository {
           }
         }
 
+        // Entity existence check for updates and deletes
+        if (op.type === 'TASK_UPDATE_FIELD' || op.type === 'TASK_DELETE') {
+          const existsInSnapshot = snapshot.tasks.some((t) => t.id === op.entityId);
+          if (!existsInSnapshot) {
+            const createRow = this.db
+              .prepare("SELECT 1 FROM operations WHERE project_id = ? AND entity_id = ? AND type = 'TASK_CREATE'")
+              .get(projectId, op.entityId);
+
+            if (!createRow) {
+              acks.push({
+                opId: op.opId,
+                serverSeq: null,
+                status: 'REJECTED',
+                reason: `TASK_NOT_FOUND: Entity '${op.entityId}' does not exist in workspace`
+              });
+              continue;
+            }
+          }
+        }
+
         // 4. Semantic Conflict Evaluation against recent concurrent operations and existing unresolved conflicts
         const recentOpsOnEntity = this.getRecentOperationsOnEntity(projectId, op.entityId, 50);
         let hasConflict = false;

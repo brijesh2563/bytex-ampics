@@ -1,7 +1,7 @@
 # NexusSync Architecture, Logic & Protocol Specification
 
 **Tagline:** Prevent Conflicts. Protect Changes. Prove Consistency.  
-**Version:** 0.4.0 (Step 4: Semantic Conflict Detection & DAG Invariant Engine)  
+**Version:** 0.5.0 (Step 5: Network Fault Simulator, Partition Recovery & Convergence Testing)  
 **Status:** Authoritative Backend & Protocol Reference  
 **Maintainers:** Antigravity Backend Engineer & ChatGPT Technical Lead  
 
@@ -10,24 +10,26 @@
 ## 1. Project Purpose & System Architecture
 
 NexusSync is an offline-first, conflict-aware distributed collaboration engine built for real-time task management and multi-replica consistency. It provides:
-1. **Local-First Availability:** Replicas mutate state locally without network blockages, persisting changes to IndexedDB.
+1. **Local-First Availability:** Replicas mutate state locally without network blockages, persisting changes locally.
 2. **Causal Concurrency & Vector Clocks:** Operations carry causal metadata (Vector Clocks and Lamport timestamps) component-wise evaluated to differentiate sequential mutations from concurrent branches.
 3. **Task Dependency DAG Invariant Engine:** Enforces that task dependencies remain a strict Directed Acyclic Graph (DAG), preventing directed cycles and self-dependencies.
 4. **Semantic Conflict Detection & Quarantine:** Identifies scalar field collisions and delete/update collisions between concurrent operations, quarantines conflicting branches, and preserves deterministic snapshot state until resolution.
 5. **Orthogonal Field-Level Auto-Merge:** Deterministically merges concurrent edits touching disjoint task fields without artificial conflict creation.
 6. **Manual Conflict Resolution Protocol:** Provides transactional conflict resolution, immutable `CONFLICT_RESOLVE` log entries, sequence allocation, peer broadcast, and resolution memory persistence.
 7. **Monotonic Total Ordering & Idempotency:** The server assigns monotonic sequence numbers (`serverSeq`) transactionally per workspace, deduplicating identical retries and rejecting conflicting `opId` reuse.
+8. **Deterministic Network Fault Simulation & Convergence Verification:** Includes a reproducible, seeded discrete-event simulation harness verifying convergence under network latency, packet drops, duplicate delivery, reordering, and arbitrary network partitions.
 
 ```mermaid
 flowchart TD
-    subgraph ClientReplicas["Client Replicas (React + IndexedDB)"]
+    subgraph ClientReplicas["Client Replicas (React / In-Memory Simulator)"]
         ClientA["Replica A"]
         ClientB["Replica B"]
+        ClientC["Replica C"]
     end
 
-    subgraph Transport["Transport Layer (Socket.IO + REST)"]
-        Gateway["Socket.IO Gateway (Port 4000)"]
-        REST["Express REST Endpoints"]
+    subgraph Transport["Transport & Fault Simulation Layer"]
+        SimNet["SimulatedNetwork / Socket.IO Gateway"]
+        Faults["Fault Injector (Drops, Delays, Duplicates, Partitions)"]
     end
 
     subgraph SyncCore["Sync Coordinator & Invariant Engine"]
@@ -43,12 +45,12 @@ flowchart TD
         DB[("SQLite WAL Mode\noperations | snapshots | conflicts | resolution_memory | project_sequences")]
     end
 
-    ClientA <-->|client:push-ops / server:broadcast-ops| Gateway
-    ClientB <-->|client:handshake / server:catchup| Gateway
-    ClientA <-->|client:resolve-conflict / server:conflict-resolved| Gateway
-    ClientA -->|GET /workspaces/:id/snapshot| REST
+    ClientA <-->|PUSH_OPS / BROADCAST_OPS| SimNet
+    ClientB <-->|HANDSHAKE / CATCHUP| SimNet
+    ClientC <-->|RESOLVE_CONFLICT / CONFLICT_RESOLVED| SimNet
+    SimNet <--> Faults
 
-    Gateway --> Validator
+    SimNet --> Validator
     Validator --> Causality
     Causality --> DAGEngine
     DAGEngine --> ConflictEngine
@@ -101,304 +103,145 @@ bytex-coll/
 │   │   │   └── sync-handlers.ts   # Socket.IO handshake, push-ops, resolve-conflict handlers
 │   │   └── server.ts              # Express + HTTP + Socket.IO bootstrap
 │   └── tests/
-│       ├── database.test.ts       (3 tests)
-│       ├── health.test.ts         (2 tests)
-│       ├── operations-repository.test.ts (7 tests)
-│       ├── workspace-routes.test.ts (2 tests)
-│       ├── sync-pipeline.test.ts  (4 tests)
-│       └── semantic-conflicts-and-dag.test.ts (15 tests)
+│       ├── simulation/            # Deterministic Network Fault & Convergence Harness
+│       │   ├── seeded-random.ts       # Mulberry32 reproducible PRNG
+│       │   ├── simulated-network.ts   # Discrete-event packet scheduler with fault injection
+│       │   ├── simulated-replica.ts   # Local-first client node with contiguous gap detection
+│       │   ├── simulation-harness.ts  # End-to-end integration between DB, repo, network & replicas
+│       │   └── convergence-invariants.ts # Formal verifier for all 10 convergence invariants
+│       ├── network-fault-scenarios.test.ts   (7 tests: Scenarios A through G)
+│       ├── network-stress-randomized.test.ts (2 tests: Multi-seed pseudo-random stress suite)
+│       ├── semantic-conflicts-and-dag.test.ts (15 tests)
+│       ├── operations-repository.test.ts      (7 tests)
+│       ├── sync-pipeline.test.ts              (4 tests)
+│       ├── workspace-routes.test.ts           (2 tests)
+│       ├── health.test.ts                     (2 tests)
+│       └── database.test.ts                   (3 tests)
 └── src/                           # React 19 Frontend (Owned by Frontend Developer)
 ```
 
 ---
 
-## 3. Causal Ordering & Vector-Clock Evaluation
+## 3. Deterministic Network Fault Simulator Architecture
 
-NexusSync rejects wall-clock timestamps and client sequence numbers as causal proof. Causality is strictly determined component-wise using vector clocks (`VersionVector = Record<ReplicaId, number>`).
+The test harness provides a discrete-event network simulator (`SimulatedNetwork`) operating on discrete virtual clock ticks without relying on wall-clock `sleep()`:
 
-### A. Four-Way Causal Evaluation (`evaluateCausality(v1, v2)`)
-Given two vectors $V_1$ and $V_2$:
-- **`EQUAL` ($V_1 = V_2$):** $\forall k, V_1[k] = V_2[k]$.
-- **`AFTER` ($V_1 > V_2$):** $\forall k, V_1[k] \ge V_2[k]$ and $\exists k, V_1[k] > V_2[k]$. $V_1$ causally follows $V_2$.
-- **`BEFORE` ($V_1 < V_2$):** $\forall k, V_1[k] \le V_2[k]$ and $\exists k, V_1[k] < V_2[k]$. $V_1$ causally precedes $V_2$.
-- **`CONCURRENT` ($V_1 \parallel V_2$):** $\exists i, V_1[i] > V_2[i]$ AND $\exists j, V_2[j] > V_1[j]$. Neither causally precedes the other; mutations were performed in parallel.
+### A. Supported Fault Models
+1. **Packet Drops (`dropRate`):** Simulates lost IP/WebSocket packets. Dropped packets are counted in metrics and never delivered.
+2. **Duplicate Packets (`duplicateRate`):** Duplicates messages with random delay offsets to test `opId` idempotency and client duplicate-rejection.
+3. **Reordering Jitter (`reorderRate`):** Randomly jitters delivery ticks so later messages arrive before earlier messages.
+4. **Arbitrary Network Partitions (`partition(groups)`):** Partitions nodes into disjoint network sets (e.g., `{ReplicaA}` vs `{ReplicaB, ReplicaC, Server}`). Communication between different partition groups drops until `healPartitions()` is called.
+5. **Replica Disconnections (`disconnect(nodeId)` / `reconnect(nodeId)`):** Simulates offline mobile/desktop clients losing internet connectivity.
+6. **Reproducible PRNG (`SeededRandom`):** Uses Mulberry32 with recorded seeds so any failing test case can be deterministically reproduced.
 
-### B. Strict Validation & Missing Replica Entries
-- `validateVectorStrict(v)` enforces that every replica counter is a finite, non-negative integer ($\ge 0$). Malformed or negative values throw an error and reject the operation.
-- Absent components are treated consistently as $0$ ($V[k] ?? 0$).
-- Client-supplied `serverSeq` is untrusted on ingress and overwritten with authoritative server sequence allocation.
-
----
-
-## 4. Task Dependency DAG Invariant Engine
-
-The dependency graph between tasks must remain a Directed Acyclic Graph (DAG) at all times. A directed edge $A \rightarrow B$ indicates that task $A$ depends on prerequisite task $B$.
-
-### A. Cycle Detection Algorithm
-1. **Self-Dependency Check:** $A \rightarrow A$ is forbidden ($O(1)$).
-2. **Path Reachability Check:** When adding edge $A \rightarrow B$, a cycle is formed if and only if there is already an existing path from $B$ to $A$ ($B \rightsquigarrow A$).
-3. **Algorithm:** BFS/DFS traversal beginning at target $B$ traversing outgoing prerequisite edges in the active task graph.
-4. **Complexity:** Time complexity $O(V + E)$ where $V \le \text{task count}$ and $E \le \text{dependency count}$. Space complexity $O(V)$ for visited tracking.
-5. **Global Invariant Check (Kahn's Algorithm):** `isGraphGloballyAcyclic(tasks)` calculates in-degrees across all active tasks and computes topological ordering to guarantee global acyclicity across arbitrary batch or resolution states.
-
-### B. Transactional Invariant Enforcement
-All DAG validations occur inside `runTransaction` (`BEGIN IMMEDIATE` in SQLite). If an incoming `DEPENDENCY_ADD` would create a directed cycle, refer to an unknown task, or reference a deleted task:
-- The operation is **REJECTED** with structured ack: `{ status: 'REJECTED', reason: 'INVARIANT_VIOLATION: DEPENDENCY_CYCLE' }`.
-- The snapshot is **not** mutated.
-- The operation is **not** broadcast.
+### B. Broadcast Sequence Gap Detection
+To prevent client replicas from permanently missing operations when offline or when broadcast packets are dropped:
+- A replica only advances its `lastServerSeq` upon receiving a broadcast if the operation is **strictly contiguous** ($op.serverSeq === lastServerSeq + 1$).
+- If $op.serverSeq > lastServerSeq + 1$ (indicating a gap in the broadcast stream), the replica applies the operation but preserves its low-water mark `lastServerSeq`.
+- When the replica reconnects or catches up via `requestCatchup()`, the server returns all missed operations starting from the low-water mark `lastServerSeq`, completely filling the gap.
 
 ---
 
-## 5. Semantic Conflict Detection & Quarantine Lifecycle
+## 4. Replica & Partition Scenarios (Step 5 Test Suite)
 
-When two operations affecting the same task are evaluated as `CONCURRENT` ($V_1 \parallel V_2$):
+Implemented in `server/tests/network-fault-scenarios.test.ts`:
 
-### A. Causally Ordered Updates
-If $V_{incoming}$ causally follows $V_{previous}$ (`AFTER`), the update is accepted and applied sequentially. No conflict is flagged.
-
-### B. Orthogonal Field-Level Auto-Merge
-If two concurrent operations modify independent fields of the same task (e.g. Replica A updates `priority` while Replica B updates `title`):
-- Both operations are committed to the operation log.
-- Both updates are applied to the snapshot, preserving both valid user modifications deterministically.
-- No artificial conflict is created.
-
-### C. Concurrent Same-Field Collision (`CONCURRENT_FIELD_COLLISION`)
-If two concurrent operations modify the same scalar field (e.g. `status` or `priority`) with different values:
-- A durable conflict record is inserted into the `conflicts` table (`status = 'UNRESOLVED'`).
-- Both competing branches (`branchA` and `branchB`) are preserved along with their `replicaId`, `opId`, `value`, and `timestamp`.
-- The conflicting value is **quarantined**: it is NOT applied to the authoritative task snapshot as a silent winner.
-- The second operation is logged in the operation log, but snapshot state remains in its deterministic pre-collision state.
-- `server:conflict-detected` is broadcast to the project room.
-
-### D. Delete/Update Collision (`DELETE_UPDATE_COLLISION`)
-If one replica deletes a task while another concurrent replica updates a field:
-- A conflict record of type `DELETE_UPDATE_COLLISION` is created.
-- The task is not silently resurrected or discarded.
-- State is quarantined pending user review.
+- **Scenario A (Normal Synchronization):** 3 replicas (A, B, C) perform sequential and concurrent mutations. Verified that operations are durably committed, sequences are monotonic, and room broadcasts converge all nodes.
+- **Scenario B (Offline Partition & Reconnect):** Replica A is partitioned while B & C make progress. A enqueues local pending operations offline. Upon partition healing, A flushes pending ops, catches up, and all 3 replicas achieve 100% state equivalence.
+- **Scenario C (Duplicate & Reordered Messages):** Injects 50% duplicate delivery and 50% reordering jitter. Verified that duplicate `opId` submissions return `DUPLICATE_IGNORED` without advancing sequence counters, conflicting `opId` reuse is rejected, and out-of-order mutations converge.
+- **Scenario D (Concurrent Same-Field Collision):** Partitions A and B; both modify the same scalar field from a shared baseline. After reconnect, verified durable quarantine of both branches in `conflicts`, non-pollution of snapshot, manual conflict resolution via `MERGE_CUSTOM`, and convergence.
+- **Scenario E (Orthogonal Edits):** Partitions A and B; A mutates `priority` while B mutates `title`. After reconnect, verified deterministic field-level merge preserves both valid changes without creating false conflicts.
+- **Scenario F (Dependency Cycles Under Partition):** Concurrent dependency additions under partition ($A \rightarrow B$ and $B \rightarrow A$). Verified cycle detection rejects the second addition, snapshot graph remains strictly acyclic, and rejected ops are not broadcast.
+- **Scenario G (Partition Recovery with Conflict Resolution):** A conflict is generated and resolved while Replica A is offline. Upon reconnect, A requests catch-up, receives the `CONFLICT_RESOLVE` log entry, clears unresolved conflict badges, and converges to the resolved state.
 
 ---
 
-## 6. Manual Conflict Resolution Protocol
+## 5. Convergence Definition & Invariants
 
-Clients resolve unresolved conflicts by emitting `client:resolve-conflict`.
+### A. Definition of Convergence
+Two replicas are defined as **converged** if and only if:
+1. Both replicas have processed all committed server operations up to the server's highest sequence number ($lastServerSeq = highestServerSeq$).
+2. Both replicas have zero pending unacknowledged operations ($pendingQueue.length = 0$).
+3. The projected active task models on both replicas are identical in active count, attributes (`title`, `status`, `priority`, `dueDate`), and dependencies.
 
-### A. Validation & Safeguards
-1. Validates payload via `validateConflictResolutionPayload`.
-2. Validates `conflictId`, `entityId`, and project scope in SQLite.
-3. Ensures conflict exists and `status === 'UNRESOLVED'`.
-4. Enforces idempotency: if already resolved, returns `ACCEPTED` with existing sequence.
-5. Simulates resolution against workspace snapshot tasks and validates global DAG acyclicity via `isGraphGloballyAcyclic`.
+Replicas with unacknowledged local mutations or un-resolved conflicts are quarantined and explicitly distinguished from converged state.
 
-### B. Transactional Commit Lifecycle
-Within a single `BEGIN IMMEDIATE` transaction:
-1. Allocates next monotonic `serverSeq`.
-2. Records an immutable `CONFLICT_RESOLVE` operation in `operations`.
-3. Updates `document_snapshots` with `resolvedFields` and increments task version.
-4. Updates `conflicts` table: sets `status = 'RESOLVED'`, `winning_value`, `resolved_by`, and `resolved_at`.
-5. If `rememberDecision: true`, persists the pattern hash into `resolution_memory`.
-6. Commits transaction.
-
-### C. Post-Commit Broadcast
-Only after the transaction commits:
-- Acknowledges submitter via callback: `{ ack: { status: 'ACCEPTED', serverSeq } }`.
-- Emits `server:conflict-resolved` with `{ conflictId, resolutionOp }` to `project:${projectId}`.
-- Broadcasts `resolutionOp` via `server:broadcast-ops` to room peers.
+### B. The 10 Formally Verified Invariants
+Checked by `ConvergenceInvariantChecker.runAll(harness, replicas)`:
+1. **Operation Durability:** Every operation acknowledged as `ACCEPTED` exists in the SQLite `operations` table with non-null `server_seq`.
+2. **Idempotency:** Replaying an identical operation returns `DUPLICATE_IGNORED` without incrementing sequence numbers or duplicating log rows.
+3. **Sequence Integrity:** `server_seq` within a project is strictly monotonic ($1, 2, 3, \dots, N$) with zero gaps and zero duplicates.
+4. **Conflict Preservation:** All unresolved conflicts retain both competing branches with replica IDs, operation IDs, values, and timestamps.
+5. **DAG Safety:** Authoritative task snapshots are verified globally acyclic via Kahn's algorithm (`isGraphGloballyAcyclic`).
+6. **Resolution Consistency:** Resolved conflicts produce durable `CONFLICT_RESOLVE` operations and winning values in SQLite.
+7. **Recovery Completeness:** Replicas that complete catch-up reach $lastServerSeq = highestServerSeq$.
+8. **Deterministic Replay:** Reconstructing the task map from scratch by sequentially reducing all operations in `server_seq ASC` order produces the identical state as the cached snapshot.
+9. **Partition Recovery:** Reconnected replicas flush their offline queues to zero pending operations.
+10. **State Convergence:** All active tasks on all caught-up replicas match the server authoritative snapshot identically.
 
 ---
 
-## 7. Operation Lifecycle Diagram
+## 6. Multi-Seed Randomized Stress Suite
 
-```mermaid
-sequenceDiagram
-    autonumber
-    participant Client as Submitting Replica
-    participant Socket as Socket.IO Gateway
-    participant Validator as Runtime Validator
-    participant Repo as OperationsRepository
-    participant DB as SQLite (WAL)
-    participant Peers as Other Project Replicas
-
-    Client->>Socket: client:push-ops { operations: [Op] }
-    Socket->>Validator: validateBatch() & validateSyncOperation()
-    alt Malformed Payload
-        Validator-->>Socket: Invalid payload
-        Socket-->>Client: server:error { code: 'MALFORMED_OPERATION' }
-    else Valid Payload
-        Socket->>Repo: ingestBatch(projectId, operations)
-        Repo->>DB: BEGIN IMMEDIATE
-        
-        loop For each Op in batch
-            alt opId already exists
-                Repo->>DB: Compare stored op with incoming op
-                alt Content Identical
-                    Repo-->>Repo: Ack: DUPLICATE_IGNORED
-                else Content Differs
-                    Repo-->>Repo: Ack: REJECTED ('CONFLICTING_OP_ID')
-                end
-            else op.type == DEPENDENCY_ADD
-                Repo-->>Repo: validateDependencyAddition(snapshot, taskId, depId)
-                alt Cycle or Unknown Task Detected
-                    Repo-->>Repo: Ack: REJECTED ('DEPENDENCY_CYCLE')
-                else Valid DAG Edge
-                    Repo-->>Repo: Accept Op
-                end
-            else Causality Check (Concurrent?)
-                Repo-->>Repo: evaluateCausality(op.vector, prevOp.vector)
-                alt Concurrent Same Field or Delete/Update
-                    Repo->>DB: INSERT INTO conflicts (status: 'UNRESOLVED')
-                    Repo-->>Repo: Flag as Quarantined (do not mutate snapshot)
-                else Orthogonal Field or Sequential
-                    Repo-->>Repo: Direct Snapshot Application
-                end
-            end
-            
-            alt Accepted Operation
-                Repo->>DB: nextSeq = last_server_seq + 1
-                Repo->>DB: INSERT INTO operations (server_seq: nextSeq)
-                opt Not Quarantined
-                    Repo->>DB: UPDATE document_snapshots
-                end
-                Repo->>DB: UPDATE project_sequences
-                Repo-->>Repo: Ack: ACCEPTED
-            end
-        end
-        
-        Repo->>DB: COMMIT
-        Repo-->>Socket: { acks, committedOps, detectedConflicts }
-        Socket-->>Client: server:ack-ops { acks } (or callback)
-        
-        opt detectedConflicts.length > 0
-            loop Each Conflict
-                Socket->>Peers: server:conflict-detected { conflict }
-            end
-        end
-
-        opt committedOps.length > 0
-            Socket->>Peers: server:broadcast-ops { operations: committedOps }
-        end
-    end
-```
+Implemented in `server/tests/network-stress-randomized.test.ts`:
+- **Configuration:** 4 replicas, 40 pseudo-random rounds per seed under active network faults (8% drops, 12% duplicates, 15% reordering jitter).
+- **Randomized Actions:** Random task creation, field updates, dependency additions, random network cuts, partition healing, node disconnects, and catch-up triggers.
+- **Seeds Tested:** `seed = 98765`, `seed = 54321`.
+- **Results:** 100% convergence across all seeds; all 10 invariants passed without failure.
 
 ---
 
-## 8. Database Schema & Persistence
+## 7. Simulated vs Production Implementation Boundaries
 
-Engineered using Node.js built-in `node:sqlite` (`DatabaseSync`) with WAL mode (`PRAGMA journal_mode = WAL;`) and foreign keys:
-
-```sql
--- 1. Operations Log (Immutable Append-Only Log)
-CREATE TABLE IF NOT EXISTS operations (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  op_id TEXT NOT NULL UNIQUE,                -- Global idempotency key
-  project_id TEXT NOT NULL,
-  entity_id TEXT NOT NULL,
-  type TEXT NOT NULL,
-  payload TEXT NOT NULL,
-  replica_id TEXT NOT NULL,
-  client_seq INTEGER NOT NULL,
-  server_seq INTEGER,                        -- Global commit order per project
-  lamport_time INTEGER NOT NULL,
-  version_vector TEXT NOT NULL,
-  timestamp INTEGER NOT NULL,
-  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-);
-CREATE INDEX idx_operations_project_server_seq ON operations(project_id, server_seq);
-CREATE UNIQUE INDEX idx_operations_project_server_seq_unique ON operations(project_id, server_seq) WHERE server_seq IS NOT NULL;
-CREATE INDEX idx_operations_op_id ON operations(op_id);
-CREATE INDEX idx_operations_entity ON operations(project_id, entity_id);
-
--- 2. Monotonic Sequence Allocation
-CREATE TABLE IF NOT EXISTS project_sequences (
-  project_id TEXT PRIMARY KEY,
-  last_server_seq INTEGER NOT NULL DEFAULT 0,
-  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-);
-
--- 3. Document Snapshots Cache
-CREATE TABLE IF NOT EXISTS document_snapshots (
-  project_id TEXT PRIMARY KEY,
-  server_seq INTEGER NOT NULL DEFAULT 0,
-  version_vector TEXT NOT NULL DEFAULT '{}',
-  snapshot_data TEXT NOT NULL DEFAULT '{}',
-  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-);
-
--- 4. Conflicts Registry (Quarantined Branches)
-CREATE TABLE IF NOT EXISTS conflicts (
-  conflict_id TEXT PRIMARY KEY,
-  project_id TEXT NOT NULL,
-  entity_id TEXT NOT NULL,
-  field TEXT,
-  type TEXT NOT NULL,
-  status TEXT NOT NULL DEFAULT 'UNRESOLVED',
-  branch_a TEXT NOT NULL,
-  branch_b TEXT NOT NULL,
-  suggested_resolution TEXT,
-  winning_value TEXT,
-  resolved_by TEXT,
-  resolved_at TEXT,
-  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-);
-CREATE INDEX idx_conflicts_project_status ON conflicts(project_id, status);
-
--- 5. Resolution Memory (Learned Conflict Resolution Patterns)
-CREATE TABLE IF NOT EXISTS resolution_memory (
-  id TEXT PRIMARY KEY,
-  pattern_hash TEXT NOT NULL UNIQUE,
-  conflict_type TEXT NOT NULL,
-  field TEXT NOT NULL,
-  chosen_pattern TEXT NOT NULL,
-  resolution_data TEXT NOT NULL,
-  times_applied INTEGER NOT NULL DEFAULT 1,
-  last_used DATETIME DEFAULT CURRENT_TIMESTAMP
-);
-```
+| Feature | Production Code (`server/src/`, `packages/shared/`) | Simulation Test Harness (`server/tests/simulation/`) |
+| :--- | :--- | :--- |
+| **Operation Log Persistence** | Durable Node 24 `node:sqlite` in WAL mode | Tested using in-memory SQLite (`:memory:`) |
+| **Monotonic Sequencing** | Transactional `BEGIN IMMEDIATE` sequencer | Tested under concurrent load & retries |
+| **Causal Evaluation** | `evaluateCausality` in `@nexussync/shared` | Validated under concurrent branches |
+| **DAG Invariant Engine** | BFS reachability & Kahn's algorithm | Validated under cyclic partition merges |
+| **Conflict Quarantine** | SQLite `conflicts` & `resolution_memory` | Validated under network fault recovery |
+| **Client Optimistic Queue** | *Pending Frontend / Browser IndexedDB* | Implemented in `SimulatedReplica` |
+| **Network Fault Injection** | N/A (Standard Socket.IO in production) | Implemented in `SimulatedNetwork` |
 
 ---
 
-## 9. Security Assumptions & Prototype Limitations
-
-1. **Authentication:** The prototype currently trusts client-supplied `replicaId` and `projectId`. Production JWT/session authentication is scheduled for post-hackathon phases.
-2. **Batch Limits:** Maximum batch size is restricted to 50 operations (`MAX_BATCH_SIZE = 50`) and individual operation JSON size to 64KB (`MAX_PAYLOAD_BYTES = 65536`).
-3. **Resolution Memory Automation:** While pattern hashes are stored upon manual resolution when `rememberDecision = true`, automatic auto-application without human supervision is disabled in Step 4 to ensure deterministic safety.
-
----
-
-## 10. Test Coverage & Verification Results
+## 8. Test Coverage & Verification Results
 
 * Command executed: `npm run test:all`
-* **Test Suites:** 9 test files, **58 tests passed (0 failures)**.
-  * `@nexussync/shared`:
+* **Total Tests:** **11 test files, 67 tests passed (0 failures)**.
+  * `@nexussync/shared` (Vitest v5.0.3):
     * `tests/vector-clock.test.ts` (10 tests passed)
     * `tests/dag.test.ts` (7 tests passed)
     * `tests/validation.test.ts` (8 tests passed)
-  * `@nexussync/server`:
+  * `@nexussync/server` (Vitest v3.2.7):
+    * `tests/network-fault-scenarios.test.ts` (7 tests passed)
+    * `tests/network-stress-randomized.test.ts` (2 tests passed)
     * `tests/semantic-conflicts-and-dag.test.ts` (15 tests passed)
-    * `tests/database.test.ts` (3 tests passed)
-    * `tests/health.test.ts` (2 tests passed)
+    * `tests/sync-pipeline.test.ts` (4 tests passed)
     * `tests/operations-repository.test.ts` (7 tests passed)
     * `tests/workspace-routes.test.ts` (2 tests passed)
-    * `tests/sync-pipeline.test.ts` (4 tests passed)
+    * `tests/health.test.ts` (2 tests passed)
+    * `tests/database.test.ts` (3 tests passed)
 
 * **Build & Typecheck:**
   * Shared package typecheck: `npm run typecheck` (`tsc --noEmit`) passed.
   * Server compilation: `npm run server:build` (`tsc`) passed with 0 errors.
   * Root linter: `npm run lint` (`eslint .`) passed with 0 warnings/errors.
-  * Root frontend build: `npm run build` (`vite build`) passed.
+  * Root frontend build: `npm run build` (`vite build`) passed in 2.53s.
 
 ---
 
-## 11. Outstanding Frontend Integration Questions
+## 9. Outstanding Frontend Integration Requirements
 
-1. **Conflict Quarantine UI:** When `server:conflict-detected` is received, how will the frontend visually render the quarantined state? (Recommended: A split-diff card highlighting branch A and branch B with resolution actions: Choose A, Choose B, Custom Merge).
-2. **DAG Cycle Toast:** When a client attempts to add a dependency that is rejected with `INVARIANT_VIOLATION: DEPENDENCY_CYCLE`, how should the user be alerted? (Recommended: An inline error tooltip on the dependency selector).
-3. **Resolution Memory Opt-In:** Will the resolution modal feature a checkbox `"Remember this resolution for similar conflicts"` to populate `rememberDecision: boolean`?
+1. **Client Pending Operation Queue:** The frontend developer must implement an IndexedDB-backed pending queue mirroring `SimulatedReplica.pendingQueue` to store unacknowledged mutations while offline.
+2. **Contiguous Broadcast Pointer:** The frontend client socket listener must advance `lastServerSeq` only for contiguous operations ($serverSeq = lastServerSeq + 1$), requesting catch-up whenever a sequence gap is detected.
+3. **Conflict Badging & Quarantine:** The UI must display quarantined conflict badges and provide the resolution modal invoking `client:resolve-conflict`.
 
 ---
 
-## 12. Recommended Next Backend Phase (Step 5)
+## 10. Recommended Next Backend Phase (Step 6)
 
-**Step 5: Network Fault Injection, Offline Simulation & Convergence Verification**
-1. Implement a configurable network fault simulator in backend test harness (latency, jitter, packet drop, partitioned disconnects).
-2. Automated multi-replica offline desynchronization and reconvergence stress testing.
-3. Verification of state equivalence across all participating nodes after randomized network partitions heal.
+**Step 6: Resolution Memory Pattern Engine, Conflict Analytics & Hardening**
+1. Automated matching against `resolution_memory` rules for high-confidence suggestions.
+2. Endpoints for conflict statistics, resolution audit logs, and performance profiling.
+3. Preparation for production packaging and deployment readiness.
