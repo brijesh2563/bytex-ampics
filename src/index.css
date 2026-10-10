@@ -1,1 +1,107 @@
 @import "tailwindcss";
+
+@theme {
+  --color-paper: #F5F0E6;
+  --color-paper-raised: #FBF7EE;
+  --color-line: #DDD1B8;
+  --color-border: #E0D6C2;
+  --color-dial-ring: #CDBF9F;
+  --color-tick: #8A7A5A;
+  --color-ink: #2A211B;
+  --color-ink-soft: #6B5D45;
+  --color-ink-faint: #8A7A5A;
+  --color-copper: #A85F33;
+  --color-copper-deep: #8C4A26;
+  --color-verdigris: #2F7D6B;
+  --color-ochre: #C48A1E;
+  --color-rust: #A63A2B;
+
+  --font-display: 'Instrument Serif', Georgia, serif;
+  --font-newsreader: 'Newsreader', Georgia, serif;
+  --font-sans: 'Instrument Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: 'IBM Plex Mono', monospace;
+  --font-hand: 'Reenie Beanie', cursive;
+}
+
+:root {
+  --paper: #F5F0E6;
+  --paper-raised: #FBF7EE;
+  --line: #DDD1B8;
+  --border: #E0D6C2;
+  --dial-ring: #CDBF9F;
+  --tick: #8A7A5A;
+  --ink: #2A211B;
+  --ink-soft: #6B5D45;
+  --ink-faint: #8A7A5A;
+  --copper: #A85F33;
+  --copper-deep: #8C4A26;
+  --verdigris: #2F7D6B;
+  --ochre: #C48A1E;
+  --rust: #A63A2B;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  background-color: var(--paper);
+  color: var(--ink);
+  font-family: 'Instrument Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+  margin: 0;
+  padding: 0;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* 3% SVG feTurbulence Paper Grain Overlay */
+.paper-grain-overlay {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 9999;
+  opacity: 0.035;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E");
+}
+
+/* Observatory Precision Focus Ring */
+:focus-visible {
+  outline: 2px solid var(--copper);
+  outline-offset: 2px;
+}
+
+/* Editorial Line & Border Utilities */
+.hairline-b {
+  border-bottom: 1px solid var(--line);
+}
+.hairline-t {
+  border-top: 1px solid var(--line);
+}
+.hairline-l {
+  border-left: 1px solid var(--line);
+}
+.hairline-r {
+  border-right: 1px solid var(--line);
+}
+.instrument-card {
+  background-color: var(--paper-raised);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+/* Typography Helpers */
+.font-display {
+  font-family: 'Instrument Serif', Georgia, serif;
+}
+.font-newsreader {
+  font-family: 'Newsreader', Georgia, serif;
+}
+.font-mono {
+  font-family: 'IBM Plex Mono', monospace;
+  font-feature-settings: 'tnum';
+}
+.font-hand {
+  font-family: 'Reenie Beanie', cursive;
+}
