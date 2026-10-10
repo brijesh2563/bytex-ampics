@@ -195,3 +195,34 @@ export interface WorkspaceSnapshot {
   tasks: TaskEntity[];
   unresolvedConflicts: ConflictRecord[];
 }
+
+/**
+ * AI Conflict Advisor Types (Ollama Cloud)
+ * Advisory only - non-mutating schema for intelligent resolution recommendations.
+ */
+export interface ConflictAdvisorSuggestion {
+  strategy: ResolutionStrategy;
+  suggestedValue: unknown;
+  confidence: number; // 0.0 to 1.0
+  rationale: string;
+}
+
+export interface ConflictAdvisorAnalysis {
+  conflictId: string;
+  projectId: DocumentId;
+  entityId: EntityId;
+  field?: UpdatableTaskField;
+  explanation: string;
+  suggestions: ConflictAdvisorSuggestion[];
+  risks: string[];
+  requiresHumanApproval: true;
+  modelUsed: string;
+  analyzedAt: string;
+}
+
+export interface ConflictAdvisorResponse {
+  success: boolean;
+  data?: ConflictAdvisorAnalysis;
+  error?: string;
+  code?: string;
+}

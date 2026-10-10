@@ -13,11 +13,13 @@ import { config } from './config.js';
 import { initDatabase, closeDatabase } from './db/database.js';
 import { healthRouter } from './routes/health.js';
 import { workspaceRouter } from './routes/workspace.js';
+import { conflictAdvisorRouter } from './routes/conflict-advisor.js';
 import { errorHandler, notFoundHandler } from './middleware/error-handler.js';
 import { registerSyncHandlers } from './sockets/sync-handlers.js';
 import { OperationsRepository } from './db/operations-repository.js';
+import type { Router } from 'express';
 
-export function createApp(): Express {
+export function createApp(customAdvisorRouter?: Router): Express {
   const app = express();
 
   // Basic middleware
@@ -27,6 +29,7 @@ export function createApp(): Express {
   // Mount API routes
   app.use('/api/v1', healthRouter);
   app.use('/api/v1', workspaceRouter);
+  app.use('/api/v1', customAdvisorRouter || conflictAdvisorRouter);
 
   // Error handling
   app.use(notFoundHandler);

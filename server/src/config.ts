@@ -14,6 +14,10 @@ export interface ServerConfig {
   corsOrigin: string | string[];
   serviceName: string;
   version: string;
+  ollamaBaseUrl: string;
+  ollamaApiKey: string;
+  ollamaModel: string;
+  ollamaTimeoutMs: number;
 }
 
 const defaultDbPath = path.resolve(__dirname, '../../data/nexussync.db');
@@ -24,5 +28,9 @@ export const config: ServerConfig = {
   dbPath: process.env.DB_PATH || defaultDbPath,
   corsOrigin: process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(',') : '*',
   serviceName: 'NexusSync Sync Coordinator',
-  version: '0.1.0'
+  version: '0.1.0',
+  ollamaBaseUrl: process.env.OLLAMA_BASE_URL || 'https://ollama.com',
+  ollamaApiKey: process.env.OLLAMA_API_KEY || '',
+  ollamaModel: process.env.OLLAMA_MODEL || 'gemma4:cloud',
+  ollamaTimeoutMs: Number.parseInt(process.env.OLLAMA_TIMEOUT_MS || '15000', 10)
 };

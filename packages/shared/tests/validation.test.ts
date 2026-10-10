@@ -4,7 +4,8 @@ import {
   validateHandshake,
   validateBatch,
   isIdenticalOperation,
-  validateConflictResolutionPayload
+  validateConflictResolutionPayload,
+  validateConflictAdvisorOutput
 } from '../src/validation.js';
 import type { SyncOperation } from '../src/types.js';
 
@@ -105,5 +106,43 @@ describe('Runtime Validation Utilities', () => {
 
     const invalidField = { ...validResolution, resolvedFields: { notAField: 'val' } };
     expect(validateConflictResolutionPayload(invalidField).valid).toBe(false);
+  });
+
+  it('validates AI Conflict Advisor output correctly', () => {
+    const validAdvisorOutput = {
+      explanation: 'Concurrent edits on priority field: client-A set HIGH while client-B set CRITICAL.',
+      suggestions: [
+        {
+          strategy: 'CHOOSE_B',
+          suggestedValue: 'CRITICAL',
+          confidence: 0.9,
+          rationale: 'CRITICAL priority preserves urgency in collaborative workflows.'
+        }
+      ],
+      risks: ['May cause premature escalation if the task is not blocking.'],
+      requiresHumanApproval: true
+    };
+    expect(validateConflictAdvisorOutput(validAdvisorOutput).valid).toBe(true);
+
+    // Rejects missing explanation
+    expect(validateConflictAdvisorOutput({ ...validAdvisorOutput, explanation: '' }).valid).toBe(false);
+
+    // Rejects empty suggestions
+    expect(validateConflictAdvisorOutput({ ...validAdvisorOutput, suggestions: [] }).valid).toBe(false);
+
+    // Rejects invalid strategy
+    expect(validateConflictAdvisorOutput({
+      ...validAdvisorOutput,
+      suggestions: [{ ...validAdvisorOutput.suggestions[0], strategy: 'INVALID' }]
+    }).valid).toBe(false);
+
+    // Rejects confidence out of bounds
+    expect(validateConflictAdvisorOutput({
+      ...validAdvisorOutput,
+      suggestions: [{ ...validAdvisorOutput.suggestions[0], confidence: 1.5 }]
+    }).valid).toBe(false);
+
+    // Rejects requiresHumanApproval === false
+    expect(validateConflictAdvisorOutput({ ...validAdvisorOutput, requiresHumanApproval: false }).valid).toBe(false);
   });
 });

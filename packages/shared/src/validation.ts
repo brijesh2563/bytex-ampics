@@ -299,3 +299,78 @@ export function validateConflictResolutionPayload(raw: unknown): ValidationResul
 
   return { valid: true };
 }
+
+/**
+ * Validates the raw JSON output produced by the AI Conflict Advisor model.
+ * Enforces:
+ * 1. Non-null object with bounded size
+ * 2. explanation string
+ * 3. suggestions array (at least 1 suggestion, max 5)
+ * 4. Each suggestion must have valid strategy, confidence (0.0 to 1.0), and non-empty rationale
+ * 5. risks array of strings
+ * 6. requiresHumanApproval must strictly be true
+ */
+export function validateConflictAdvisorOutput(raw: unknown): ValidationResult {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    return { valid: false, error: 'Advisor output must be a non-null object' };
+  }
+
+  const data = raw as Record<string, unknown>;
+
+  if (typeof data.explanation !== 'string' || data.explanation.trim().length === 0) {
+    return { valid: false, error: 'explanation must be a non-empty string' };
+  }
+  if (data.explanation.length > 5000) {
+    return { valid: false, error: 'explanation exceeds maximum length of 5000 characters' };
+  }
+
+  if (!Array.isArray(data.suggestions) || data.suggestions.length === 0) {
+    return { valid: false, error: 'suggestions must be a non-empty array' };
+  }
+  if (data.suggestions.length > 5) {
+    return { valid: false, error: 'suggestions array cannot exceed 5 items' };
+  }
+
+  const validStrategies = new Set(['CHOOSE_A', 'CHOOSE_B', 'MERGE_CUSTOM', 'MEMORY_APPLIED']);
+
+  for (let i = 0; i < data.suggestions.length; i++) {
+    const s = data.suggestions[i];
+    if (!s || typeof s !== 'object' || Array.isArray(s)) {
+      return { valid: false, error: `suggestion at index ${i} must be an object` };
+    }
+    const sug = s as Record<string, unknown>;
+    if (typeof sug.strategy !== 'string' || !validStrategies.has(sug.strategy)) {
+      return { valid: false, error: `suggestion at index ${i} has invalid strategy: '${String(sug.strategy)}'` };
+    }
+    if (typeof sug.confidence !== 'number' || Number.isNaN(sug.confidence) || sug.confidence < 0 || sug.confidence > 1) {
+      return { valid: false, error: `suggestion at index ${i} confidence must be a number between 0.0 and 1.0` };
+    }
+    if (typeof sug.rationale !== 'string' || sug.rationale.trim().length === 0) {
+      return { valid: false, error: `suggestion at index ${i} rationale must be a non-empty string` };
+    }
+    if (sug.rationale.length > 2000) {
+      return { valid: false, error: `suggestion at index ${i} rationale exceeds maximum length of 2000 characters` };
+    }
+    if (sug.suggestedValue === undefined) {
+      return { valid: false, error: `suggestion at index ${i} must include suggestedValue` };
+    }
+  }
+
+  if (!Array.isArray(data.risks)) {
+    return { valid: false, error: 'risks must be an array of strings' };
+  }
+  for (let i = 0; i < data.risks.length; i++) {
+    if (typeof data.risks[i] !== 'string') {
+      return { valid: false, error: `risk at index ${i} must be a string` };
+    }
+    if ((data.risks[i] as string).length > 1000) {
+      return { valid: false, error: `risk at index ${i} exceeds maximum length of 1000 characters` };
+    }
+  }
+
+  if (data.requiresHumanApproval !== true) {
+    return { valid: false, error: 'requiresHumanApproval must strictly be boolean true' };
+  }
+
+  return { valid: true };
+}
