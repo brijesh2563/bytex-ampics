@@ -1,20 +1,22 @@
 import { useState } from 'react';
-import { Chip } from '../ui/Chip';
-import { GitCommit, Clock, ArrowRight, ShieldAlert } from 'lucide-react';
+import { Clock, Check, MoreVertical, Trash2, ArrowRightCircle } from 'lucide-react';
 
 /**
- * Task card matching the approved Stitch Observatory design.
- * Supports inline editing, dependency display, and pending sync badges.
+ * Stitch-aligned TaskCard component.
+ * Prioritizes: Title, Description, Assignee, Due Date, Priority, Dependencies, Status, Sync state.
  *
  * @param {Object} props
  * @param {Object} props.task
  * @param {string} props.replicaKey - 'replicaA' | 'replicaB'
  * @param {(replicaKey: string, taskId: string, newTitle: string) => void} props.onTitleChange
+ * @param {(replicaKey: string, taskId: string, newStatus: string) => void} [props.onStatusChange]
+ * @param {(replicaKey: string, taskId: string) => void} [props.onDelete]
  */
-export function TaskCard({ task, replicaKey, onTitleChange }) {
+export function TaskCard({ task, replicaKey, onTitleChange, onStatusChange, onDelete }) {
   const [prevTaskTitle, setPrevTaskTitle] = useState(task.title);
   const [title, setTitle] = useState(task.title);
   const [isEditing, setIsEditing] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
 
   if (task.title !== prevTaskTitle) {
     setPrevTaskTitle(task.title);
@@ -25,53 +27,108 @@ export function TaskCard({ task, replicaKey, onTitleChange }) {
 
   const handleBlur = () => {
     setIsEditing(false);
-    if (title.trim() !== task.title) {
+    if (title.trim() && title.trim() !== task.title) {
       onTitleChange(replicaKey, task.id, title.trim());
     }
   };
 
   const isPending = task.syncStatus === 'PENDING_SYNC';
-  const hasDownstream = task.impactMeta?.downstreamCount > 0;
+  const priority = (task.priority || 'MEDIUM').toUpperCase();
+
+  let priorityClass = 'bg-[#F0F4F2] text-[#697775]';
+  if (priority === 'HIGH' || priority === 'CRITICAL') {
+    priorityClass = 'bg-[#FBEBEB] text-[#B94A48]';
+  } else if (priority === 'MEDIUM') {
+    priorityClass = 'bg-[#FAF5EC] text-[#C4872D]';
+  } else if (priority === 'LOW') {
+    priorityClass = 'bg-[#E4F1EF] text-[#2F7D68]';
+  }
+
+  const assigneeName = task.assignee || 'Elena Vance';
+  const assigneeInitials = assigneeName
+    .split(' ')
+    .map((n) => n[0])
+    .join('')
+    .slice(0, 2)
+    .toUpperCase();
+
+  const statuses = [
+    { id: 'BACKLOG', label: 'Backlog' },
+    { id: 'IN_PROGRESS', label: 'In Progress' },
+    { id: 'IN_REVIEW', label: 'In Review' },
+    { id: 'COMPLETED', label: 'Completed' },
+  ];
 
   return (
     <div
-      className={`bg-[var(--paper)] border rounded-lg p-4 transition-all duration-200 relative group ${
-        isPending
-          ? 'border-[var(--copper)] shadow-xs bg-[#FAF5EC]'
-          : 'border-[var(--border)] hover:border-[var(--dial-ring)]'
+      className={`flex flex-col bg-[#FFFFFF] border rounded-xl p-4 shadow-xs hover:shadow-md transition-all relative group ${
+        isPending ? 'border-[#C4872D]/60' : 'border-[#DCE5E1]'
       }`}
       data-card-id={task.id}
     >
-      {/* Top Tag & Due Date */}
-      <div className="flex items-start justify-between gap-2">
-        <div className="flex items-center gap-1.5 flex-wrap">
-          <span className="px-2 py-0.5 rounded-[4px] text-[10px] font-mono uppercase bg-[#DDD1B8]/40 text-[var(--ink-soft)] font-medium">
-            {task.category || 'CRDT Task'}
+      {/* Top Metadata Row: ID & Priority */}
+      <div className="flex items-center justify-between gap-2 mb-2">
+        <div className="flex items-center gap-1.5">
+          <span className="px-2 py-0.5 rounded text-[10px] font-mono uppercase tracking-wider bg-[#F0F4F2] text-[#697775] font-semibold">
+            {task.id.startsWith('NX-') ? task.id : `NX-${task.id.replace('card-', '10')}`}
           </span>
-
-          {/* Pending Sync Badge */}
-          {isPending && (
-            <Chip variant="copper" hasDot className="text-[10px]">
-              Pending Sync
-            </Chip>
-          )}
-
-          {/* Conflict Badge (if held) */}
-          {task.isHeld && (
-            <Chip variant="ochre" hasDot className="text-[10px]">
-              Held · Conflict
-            </Chip>
-          )}
+          <span className={`px-2 py-0.5 rounded text-[10px] font-sans font-semibold uppercase ${priorityClass}`}>
+            {task.priority || 'Medium'}
+          </span>
         </div>
 
-        <div className="flex items-center gap-1 font-mono text-[10px] text-[var(--ink-faint)] shrink-0">
-          <Clock className="w-3 h-3 text-[var(--ink-faint)]" />
-          <span>Due: {task.dueDate || 'Nov 14'}</span>
+        {/* Card Options Menu */}
+        <div className="relative">
+          <button
+            type="button"
+            onClick={() => setMenuOpen(!menuOpen)}
+            className="w-6 h-6 rounded flex items-center justify-center text-[#697775] hover:text-[#15201F] hover:bg-[#F0F4F2] transition cursor-pointer"
+            title="Card actions"
+          >
+            <MoreVertical className="w-3.5 h-3.5" />
+          </button>
+
+          {menuOpen && (
+            <div className="absolute right-0 top-7 w-44 bg-[#FFFFFF] border border-[#DCE5E1] rounded-xl shadow-lg py-1 z-30 font-sans text-xs">
+              <div className="px-3 py-1 font-mono text-[10px] uppercase text-[#697775]">Move status</div>
+              {statuses.map((s) => (
+                <button
+                  key={s.id}
+                  type="button"
+                  onClick={() => {
+                    if (onStatusChange) onStatusChange(replicaKey, task.id, s.id);
+                    setMenuOpen(false);
+                  }}
+                  className={`w-full text-left px-3 py-1.5 hover:bg-[#F0F4F2] flex items-center justify-between ${
+                    (task.status || 'BACKLOG').toUpperCase() === s.id ? 'font-bold text-[#176D70]' : 'text-[#15201F]'
+                  }`}
+                >
+                  <span>{s.label}</span>
+                  {(task.status || 'BACKLOG').toUpperCase() === s.id && <Check className="w-3.5 h-3.5" />}
+                </button>
+              ))}
+              {onDelete && (
+                <div className="pt-1 mt-1 border-t border-[#DCE5E1]">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onDelete(replicaKey, task.id);
+                      setMenuOpen(false);
+                    }}
+                    className="w-full text-left px-3 py-1.5 hover:bg-[#FBEBEB] text-[#B94A48] flex items-center gap-2"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Delete Task</span>
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
-      {/* Editable Title Input */}
-      <div className="mt-2.5">
+      {/* Editable Title */}
+      <div className="mb-1.5">
         <input
           type="text"
           value={title}
@@ -81,61 +138,66 @@ export function TaskCard({ task, replicaKey, onTitleChange }) {
           onKeyDown={(e) => {
             if (e.key === 'Enter') e.currentTarget.blur();
           }}
-          className={`w-full bg-transparent font-sans font-medium text-[var(--ink)] text-sm sm:text-[15px] focus:outline-none border-b transition-colors ${
-            isEditing
-              ? 'border-[var(--copper)] pb-0.5'
-              : 'border-transparent hover:border-[var(--line)]'
+          className={`w-full bg-transparent font-sans font-semibold text-[#15201F] text-sm focus:outline-none transition-colors border-b ${
+            isEditing ? 'border-[#176D70] pb-0.5' : 'border-transparent hover:border-[#DCE5E1]'
           }`}
-          placeholder="Enter task description..."
+          placeholder="Task title..."
         />
       </div>
 
-      {/* Dependency & Impact Information (Structured for Future Impact Predictor) */}
-      {(task.dependencies?.length > 0 || hasDownstream) && (
-        <div className="mt-2.5 pt-2 border-t border-[var(--line)]/50 flex flex-wrap items-center gap-3 font-mono text-[10px] text-[var(--ink-soft)]">
-          {task.dependencies?.length > 0 && (
-            <span className="flex items-center gap-1 text-[var(--ink-faint)]">
-              <span>Depends on:</span>
-              <span className="font-semibold text-[var(--ink)]">
-                {task.dependencies.join(', ')}
-              </span>
-            </span>
-          )}
+      {/* Description */}
+      {task.description && (
+        <p className="font-sans text-xs text-[#697775] line-clamp-2 mb-3 leading-relaxed">
+          {task.description}
+        </p>
+      )}
 
-          {hasDownstream && (
-            <span className="flex items-center gap-1 text-[var(--copper)] font-medium">
-              <ArrowRight className="w-3 h-3" />
-              <span>{task.impactMeta.downstreamCount} downstream task connected</span>
-            </span>
-          )}
-
-          {task.impactMeta?.riskLevel === 'MEDIUM' && (
-            <span className="flex items-center gap-1 text-[var(--ochre)]">
-              <ShieldAlert className="w-3 h-3" />
-              <span>Dependency check required</span>
-            </span>
-          )}
+      {/* Dependencies if present */}
+      {task.dependencies?.length > 0 && (
+        <div className="mb-2 flex items-center gap-1 font-mono text-[10px] text-[#697775]">
+          <span className="text-[#697775]">Depends on:</span>
+          <span className="px-1.5 py-0.2 rounded bg-[#F0F4F2] text-[#15201F] font-semibold">
+            {task.dependencies.join(', ')}
+          </span>
         </div>
       )}
 
-      {/* Bottom Metadata Bar */}
-      <div className="mt-3 pt-2 border-t border-[var(--line)]/60 flex items-center justify-between font-mono text-[10px] text-[var(--ink-faint)]">
-        <span className="flex items-center gap-1">
-          <GitCommit className="w-3 h-3 text-[var(--ink-faint)]" />
-          <span>v{task.version || 14}</span>
-          <span className="text-[var(--border)]">·</span>
-          <span className="truncate max-w-[80px]">{task.id}</span>
-        </span>
+      {/* Assignee & Due Date Row */}
+      <div className="flex items-center justify-between mt-auto pt-2 border-t border-[#DCE5E1]">
+        <div className="flex items-center gap-1.5">
+          <div className="w-5 h-5 rounded-full bg-[#176D70] text-white flex items-center justify-center font-mono text-[9px] font-bold">
+            {assigneeInitials}
+          </div>
+          <span className="font-sans text-xs text-[#15201F] truncate max-w-[100px]">
+            {assigneeName}
+          </span>
+        </div>
 
-        <span
-          className={
-            isPending
-              ? 'text-[var(--copper)] font-semibold'
-              : 'text-[var(--verdigris)]'
-          }
-        >
-          {isPending ? 'Queued in Local IDB' : 'Persisted Locally'}
-        </span>
+        <div className="flex items-center gap-1 font-mono text-[11px] text-[#697775]">
+          <Clock className="w-3 h-3 text-[#697775]" />
+          <span>{task.dueDate || 'Oct 28'}</span>
+        </div>
+      </div>
+
+      {/* Sync State Indicator Footer (Saved locally · Synced OR Changes waiting to sync) */}
+      <div className="mt-2.5 pt-2 -mx-4 -mb-4 px-4 py-2 rounded-b-xl bg-[#F0F4F2] flex items-center justify-between border-t border-[#DCE5E1]">
+        {isPending ? (
+          <div className="flex items-center gap-1.5 text-[#C4872D] font-mono text-[11px] font-medium">
+            <span className="w-1.5 h-1.5 rounded-full bg-[#C4872D] animate-pulse" />
+            <span>Changes waiting to sync</span>
+          </div>
+        ) : (
+          <div className="flex items-center gap-1.5 text-[#2F7D68] font-mono text-[11px] font-medium">
+            <span className="w-1.5 h-1.5 rounded-full bg-[#2F7D68]" />
+            <span>Saved locally · Synced</span>
+          </div>
+        )}
+
+        {isPending ? (
+          <ArrowRightCircle className="w-3.5 h-3.5 text-[#C4872D]" />
+        ) : (
+          <Check className="w-3.5 h-3.5 text-[#2F7D68]" />
+        )}
       </div>
     </div>
   );

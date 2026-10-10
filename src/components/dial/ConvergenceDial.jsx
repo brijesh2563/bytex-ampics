@@ -90,10 +90,10 @@ export function ConvergenceDial({ size = 320, className = '' }) {
       className={`inline-flex flex-col items-center select-none ${className}`}
       style={{ width: size }}
     >
-      <div className="relative" style={{ width: size, height: size }}>
+      <div className="relative" style={{ width: size, height: size, overflow: 'hidden', borderRadius: '50%' }}>
         <svg
           viewBox="0 0 200 200"
-          className="w-full h-full overflow-visible"
+          className="w-full h-full"
           role="img"
           aria-label={`Convergence Instrument Dial in state ${dialState}. Replica A version ${replicaA.version}, Replica B version ${replicaB.version}`}
         >
@@ -246,7 +246,7 @@ export function ConvergenceDial({ size = 320, className = '' }) {
           <g
             id="dial-needle"
             transform={`rotate(${needleAngle} 100 100)`}
-            className="transition-transform duration-500 ease-[cubic-bezier(0.34,1.56,0.64,1)] origin-center"
+            className="transition-transform duration-500 ease-[cubic-bezier(0.34,1.56,0.64,1)]"
           >
             {/* Needle Line */}
             <line

@@ -1,10 +1,11 @@
 import { useState, useEffect } from 'react';
 import Lenis from 'lenis';
 import { Preloader } from './components/ui/Preloader';
-import { TopNav } from './components/navigation/TopNav';
 import { PageCurtain } from './components/navigation/PageCurtain';
-import { ObservatoryPage } from './pages/ObservatoryPage';
+import { AppShell } from './components/layout/AppShell';
 import { WorkspacePage } from './pages/WorkspacePage';
+import { MyTasksPage } from './pages/MyTasksPage';
+import { PendingChangesPage } from './pages/PendingChangesPage';
 import { ConflictResolverPage } from './pages/ConflictResolverPage';
 import { ConflictRadarPage } from './pages/ConflictRadarPage';
 import { ConflictImpactPage } from './pages/ConflictImpactPage';
@@ -15,12 +16,12 @@ import { EngineProofsPage } from './pages/EngineProofsPage';
 import { StatusPage } from './pages/StatusPage';
 import { LoginPage } from './pages/LoginPage';
 import { SignupPage } from './pages/SignupPage';
+import { ProfilePage } from './pages/ProfilePage';
 import { AuthGatePage } from './pages/AuthGatePage';
 import { AdminPage } from './pages/AdminPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { MotionLabPage } from './pages/MotionLabPage';
 import { useSyncStore } from './store/useSyncStore';
-import { ArrowUpRight } from 'lucide-react';
 
 export default function App() {
   const {
@@ -28,28 +29,35 @@ export default function App() {
     setActivePage,
     initWorkspace,
     setBrowserOnlineStatus,
-    theme,
+    user,
   } = useSyncStore();
 
   const [preloaderComplete, setPreloaderComplete] = useState(false);
 
-  // Synchronize theme attribute on mount
+  // NexusSync Fixed Pearl × Deep Teal theme identity
   useEffect(() => {
     if (typeof document !== 'undefined') {
-      document.documentElement.setAttribute('data-theme', theme);
-      if (theme === 'dark') {
-        document.documentElement.classList.add('dark');
-      } else {
-        document.documentElement.classList.remove('dark');
-      }
+      document.documentElement.setAttribute('data-theme', 'pearl');
+      document.documentElement.classList.remove('dark');
     }
-  }, [theme]);
+  }, []);
 
-  // Synchronize hash routing with store
+  // Synchronize hash routing with store and enforce truthful auth gate
   useEffect(() => {
     const handleHashChange = () => {
-      const page = window.location.hash.replace('#', '') || 'observatory';
-      setActivePage(page);
+      const rawHash = window.location.hash.replace('#', '');
+      const currentUser = useSyncStore.getState().user;
+      const isAuth = !!currentUser?.isAuthenticated;
+      const publicRoutes = ['login', 'signin', 'signup', 'register', 'auth', 'gate'];
+
+      let targetPage = rawHash;
+      if (!targetPage) {
+        targetPage = isAuth ? 'workspace' : 'login';
+      } else if (!isAuth && !publicRoutes.includes(targetPage)) {
+        targetPage = 'login';
+      }
+
+      setActivePage(targetPage);
     };
 
     window.addEventListener('hashchange', handleHashChange);
@@ -95,11 +103,34 @@ export default function App() {
     };
   }, [initWorkspace, setBrowserOnlineStatus]);
 
-  // Page switcher
+  // Page switcher with strict unauthenticated gating
   const renderCurrentPage = () => {
+    // Unauthenticated sessions: render only auth flow pages (Login first)
+    if (!user || !user.isAuthenticated) {
+      switch (activePage) {
+        case 'signup':
+        case 'register':
+          return <SignupPage />;
+        case 'auth':
+        case 'gate':
+          return <AuthGatePage />;
+        case 'login':
+        case 'signin':
+        default:
+          return <LoginPage />;
+      }
+    }
+
+    // Authenticated sessions: allow all instrument pages
     switch (activePage) {
       case 'workspace':
         return <WorkspacePage />;
+      case 'my-tasks':
+      case 'tasks':
+        return <MyTasksPage />;
+      case 'pending':
+      case 'pending-changes':
+        return <PendingChangesPage />;
       case 'conflicts':
       case 'resolver':
         return <ConflictResolverPage />;
@@ -115,6 +146,7 @@ export default function App() {
       case 'timeline':
       case 'vector-timeline':
         return <VectorTimelinePage />;
+      case 'simulation':
       case 'lab':
       case 'convergence-lab':
         return <ConvergenceLabPage />;
@@ -124,93 +156,42 @@ export default function App() {
       case 'status':
       case 'system-status':
         return <StatusPage />;
-      case 'auth':
-      case 'gate':
-        return <AuthGatePage />;
-      case 'signup':
-      case 'register':
-        return <SignupPage />;
-      case 'login':
-      case 'signin':
-        return <LoginPage />;
       case 'admin':
         return <AdminPage />;
       case 'settings':
         return <SettingsPage />;
       case 'motion-lab':
         return <MotionLabPage />;
+      case 'profile':
+        return <ProfilePage />;
+      case 'home':
       case 'observatory':
       default:
-        return <ObservatoryPage />;
+        return <WorkspacePage />;
     }
   };
 
+  // 1. UNAUTHENTICATED EXPERIENCE: Self-contained auth flow without desktop workspace shell
+  if (!user || !user.isAuthenticated) {
+    return (
+      <div className="min-h-screen bg-[#F6F8F6] text-[#15201F] relative flex flex-col selection:bg-[#176D70] selection:text-white transition-colors duration-300">
+        <PageCurtain />
+        <Preloader onComplete={() => setPreloaderComplete(true)} />
+        <main className="flex-1 w-full flex flex-col">
+          {renderCurrentPage()}
+        </main>
+      </div>
+    );
+  }
+
+  // 2. AUTHENTICATED EXPERIENCE: Persistent AppShell (Left Sidebar + Top Workspace Bar + Main Content Area)
   return (
-    <div className="min-h-screen bg-[var(--paper)] text-[var(--ink)] relative flex flex-col selection:bg-[var(--copper)] selection:text-[var(--paper-raised)] transition-colors duration-300">
-      {/* 1. PAPER GRAIN OVERLAY */}
-      <div className="paper-grain-overlay" aria-hidden="true" />
-
-      {/* 2. COPPER CALIBRATION CURTAIN PAGE TRANSITION */}
+    <div className="min-h-screen bg-[#F6F8F6] text-[#15201F] relative flex flex-col selection:bg-[#176D70] selection:text-white transition-colors duration-300">
       <PageCurtain />
-
-      {/* 3. INSTRUMENT PRELOADER */}
       <Preloader onComplete={() => setPreloaderComplete(true)} />
-
-      {/* 4. UNIFIED MULTI-PAGE TOP NAVIGATION */}
-      <TopNav />
-
-      {/* 5. MAIN DEDICATED PAGE VIEW CONTAINER */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8 sm:py-10 flex flex-col">
+      <AppShell>
         {renderCurrentPage()}
-      </main>
-
-      {/* 6. ARCHIVAL INSTRUMENT FOOTER */}
-      <footer className="hairline-t bg-[var(--paper-raised)] px-4 sm:px-8 py-8 mt-16 transition-colors duration-300">
-        <div className="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-6 font-mono text-xs text-[var(--ink-faint)]">
-          <div className="flex flex-wrap items-center gap-4 text-center md:text-left">
-            <span className="font-display text-xl text-[var(--ink)] tracking-tight">
-              Nexus<span className="italic text-[var(--copper)]">Sync</span>
-            </span>
-            <span className="hidden sm:inline text-[var(--border)]">|</span>
-            <span>© 2026 The Convergence Instrument · Open Source CRDT Engine</span>
-            <div className="flex items-center gap-1.5 px-2 py-0.5 rounded bg-[var(--paper)] border border-[var(--border)] text-[var(--ink)] text-[10px]">
-              <span className="text-[var(--ink-faint)]">MERKLE ROOT:</span>
-              <span className="font-bold">e9281a8c88fd12a4</span>
-            </div>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-4 text-[11px]">
-            <button
-              onClick={() => { setActivePage('proofs'); }}
-              className="hover:text-[var(--copper)] transition-colors cursor-pointer flex items-center gap-0.5"
-            >
-              <span>Formal Proofs</span>
-              <ArrowUpRight className="w-3 h-3 opacity-60" />
-            </button>
-            <button
-              onClick={() => { setActivePage('timeline'); }}
-              className="hover:text-[var(--copper)] transition-colors cursor-pointer flex items-center gap-0.5"
-            >
-              <span>Causal Op-Log</span>
-              <ArrowUpRight className="w-3 h-3 opacity-60" />
-            </button>
-            <button
-              onClick={() => { setActivePage('admin'); }}
-              className="hover:text-[var(--copper)] transition-colors cursor-pointer flex items-center gap-0.5"
-            >
-              <span>Cluster Control</span>
-              <ArrowUpRight className="w-3 h-3 opacity-60" />
-            </button>
-            <button
-              onClick={() => { setActivePage('motion-lab'); }}
-              className="hover:text-[var(--copper)] transition-colors cursor-pointer flex items-center gap-0.5"
-            >
-              <span>Motion Lab</span>
-              <ArrowUpRight className="w-3 h-3 opacity-60" />
-            </button>
-          </div>
-        </div>
-      </footer>
+      </AppShell>
     </div>
   );
 }

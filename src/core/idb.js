@@ -68,6 +68,17 @@ export async function saveTaskLocally(replicaId, task) {
 }
 
 /**
+ * Deletes a task from local IndexedDB storage.
+ * @param {string} replicaId
+ * @param {string} taskId
+ */
+export async function deleteTaskLocally(replicaId, taskId) {
+  const db = await getDB();
+  const storageKey = `${replicaId}:${taskId}`;
+  return db.delete('tasks', storageKey);
+}
+
+/**
  * Batch saves initial seed tasks for a replica if none exist yet.
  * @param {string} replicaId
  * @param {Array} initialTasks

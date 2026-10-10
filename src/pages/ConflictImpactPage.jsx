@@ -1,11 +1,13 @@
 import { useSyncStore } from '../store/useSyncStore';
+import { AiConflictAssistant } from '../components/conflict/AiConflictAssistant';
 import {
   ArrowRight,
   Edit3
 } from 'lucide-react';
 
 export function ConflictImpactPage() {
-  const { setActivePage } = useSyncStore();
+  const { conflicts, setActivePage } = useSyncStore();
+  const activeConflict = conflicts[0];
 
   return (
     <div className="flex flex-col gap-8 w-full animate-in fade-in duration-300">
@@ -147,6 +149,11 @@ export function ConflictImpactPage() {
           </div>
         </div>
       </section>
+
+      {/* 3.5 PURPOSEFUL AI CONFLICT ASSISTANT (CONTEXTUAL ADVISORY ONLY) */}
+      {activeConflict && (
+        <AiConflictAssistant conflict={activeConflict} />
+      )}
 
       {/* 4. DOWNSTREAM BLAST RADIUS DAG CASCADE VISUALIZER */}
       <section className="bg-[var(--paper-raised)] border border-[var(--border)] rounded-xl p-6 shadow-xs space-y-6">

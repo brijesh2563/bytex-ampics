@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import {
   saveTaskLocally,
+  deleteTaskLocally,
   seedTasksIfEmpty,
   queuePendingOperation,
   getPendingOperations,
@@ -93,6 +94,41 @@ function deriveTruthfulDialState(replicaA, replicaB, conflicts = []) {
   };
 }
 
+// Truthful Session Storage Persistence Helpers
+const getStoredSession = () => {
+  if (typeof sessionStorage !== 'undefined') {
+    try {
+      const stored = sessionStorage.getItem('nexussync_session');
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (parsed && parsed.isAuthenticated) {
+          return parsed;
+        }
+      }
+    } catch (e) {
+      console.warn('Failed to parse nexussync_session from sessionStorage:', e);
+    }
+  }
+  return null;
+};
+
+const initialSession = getStoredSession();
+
+const getInitialActivePage = () => {
+  if (typeof window !== 'undefined' && window.location.hash) {
+    const rawHash = window.location.hash.replace('#', '');
+    if (rawHash) {
+      const publicRoutes = ['login', 'signin', 'signup', 'register', 'auth', 'gate'];
+      // Unauthenticated sessions must land on login unless specifically accessing another public auth route
+      if (!initialSession && !publicRoutes.includes(rawHash)) {
+        return 'login';
+      }
+      return rawHash;
+    }
+  }
+  return initialSession ? 'workspace' : 'login';
+};
+
 export const useSyncStore = create((set, get) => ({
   // Browser Network State
   isBrowserOnline: typeof navigator !== 'undefined' ? navigator.onLine : true,
@@ -121,30 +157,13 @@ export const useSyncStore = create((set, get) => ({
   },
 
   // Active Page Navigation
-  activePage: typeof window !== 'undefined' && window.location.hash
-    ? window.location.hash.replace('#', '') || 'observatory'
-    : 'observatory',
+  activePage: getInitialActivePage(),
 
-  // Observatory Theme (light / dark)
-  theme: typeof localStorage !== 'undefined' && localStorage.getItem('nexussync_theme') === 'dark'
-    ? 'dark'
-    : 'light',
+  // NexusSync Fixed Pearl × Deep Teal Theme
+  theme: 'light',
 
   // Operator Auth & Session State (Truthful Local Demo Enclave)
-  user: {
-    id: 'op_aarav',
-    name: 'Aarav Sharma',
-    email: 'aarav@nexussync.org',
-    role: 'CHIEF OPERATOR',
-    replicaId: 'r_aarav-lap',
-    region: 'ap-northeast-1 (Tokyo)',
-    isAdmin: true,
-    accessLevel: 'TIER-0 ARBITER',
-    authMode: 'LOCAL / DEMO',
-    sessionType: 'LOCAL OPERATOR',
-    ed25519Fingerprint: '7F8C·914B·22D1·D91A',
-    isAuthenticated: true,
-  },
+  user: initialSession,
 
   // Active Conflicts
   conflicts: [
@@ -443,6 +462,172 @@ export const useSyncStore = create((set, get) => ({
     }
   },
 
+  updateTaskStatus: async (replicaKey, taskId, newStatus) => {
+    const state = get();
+    const replica = state[replicaKey];
+    const existingTask = replica.tasks.find((t) => t.id === taskId);
+    if (!existingTask) return;
+
+    const updatedTask = {
+      ...existingTask,
+      status: newStatus,
+      syncStatus: 'PENDING_SYNC',
+    };
+
+    const updatedTasks = replica.tasks.map((t) => (t.id === taskId ? updatedTask : t));
+
+    const op = {
+      id: `${replica.id}:op_${Date.now().toString(36)}`,
+      type: 'TASK_UPDATE_STATUS',
+      documentId: 'doc_workspace_main',
+      payload: {
+        taskId,
+        field: 'status',
+        oldValue: existingTask.status,
+        newValue: newStatus,
+      },
+      meta: {
+        replicaId: replica.id,
+        baseVersion: existingTask.version,
+        timestamp: Date.now(),
+      },
+    };
+
+    try {
+      await saveTaskLocally(replica.id, updatedTask);
+      const localOpId = await queuePendingOperation(replica.id, op);
+      const updatedPendingOps = [...replica.pendingOps, { ...op, localId: localOpId }];
+
+      set((curr) => {
+        const nextReplica = {
+          ...curr[replicaKey],
+          tasks: updatedTasks,
+          pendingOps: updatedPendingOps,
+        };
+
+        const replicaA = replicaKey === 'replicaA' ? nextReplica : curr.replicaA;
+        const replicaB = replicaKey === 'replicaB' ? nextReplica : curr.replicaB;
+
+        const derived = deriveTruthfulDialState(replicaA, replicaB, curr.conflicts);
+
+        return {
+          [replicaKey]: nextReplica,
+          ...derived,
+        };
+      });
+    } catch (err) {
+      console.error('Failed to update task status in IndexedDB:', err);
+    }
+  },
+
+  deleteTask: async (replicaKey, taskId) => {
+    const state = get();
+    const replica = state[replicaKey];
+    const existingTask = replica.tasks.find((t) => t.id === taskId);
+    if (!existingTask) return;
+
+    const remainingTasks = replica.tasks.filter((t) => t.id !== taskId);
+
+    const op = {
+      id: `${replica.id}:op_${Date.now().toString(36)}`,
+      type: 'TASK_DELETE',
+      documentId: 'doc_workspace_main',
+      payload: { taskId },
+      meta: {
+        replicaId: replica.id,
+        baseVersion: existingTask.version,
+        timestamp: Date.now(),
+      },
+    };
+
+    try {
+      await deleteTaskLocally(replica.id, taskId);
+      const localOpId = await queuePendingOperation(replica.id, op);
+      const updatedPendingOps = [...replica.pendingOps, { ...op, localId: localOpId }];
+
+      set((curr) => {
+        const nextReplica = {
+          ...curr[replicaKey],
+          tasks: remainingTasks,
+          pendingOps: updatedPendingOps,
+        };
+
+        const replicaA = replicaKey === 'replicaA' ? nextReplica : curr.replicaA;
+        const replicaB = replicaKey === 'replicaB' ? nextReplica : curr.replicaB;
+
+        const derived = deriveTruthfulDialState(replicaA, replicaB, curr.conflicts);
+
+        return {
+          [replicaKey]: nextReplica,
+          ...derived,
+        };
+      });
+    } catch (err) {
+      console.error('Failed to delete task in IndexedDB:', err);
+    }
+  },
+
+  createCustomTask: async (replicaKey, taskData) => {
+    const state = get();
+    const replica = state[replicaKey];
+    const newId = `NX-${Math.floor(100 + Math.random() * 900)}`;
+
+    const newTask = {
+      id: newId,
+      title: taskData.title || 'Untitled Task',
+      description: taskData.description || '',
+      category: taskData.category || 'Core Roadmap',
+      priority: taskData.priority || 'MEDIUM',
+      dueDate: taskData.dueDate || 'Nov 14',
+      status: taskData.status || 'BACKLOG',
+      assignee: taskData.assignee || 'Elena Vance',
+      dependencies: taskData.dependencies || [],
+      version: replica.version,
+      syncStatus: 'PENDING_SYNC',
+      impactMeta: {
+        downstreamCount: 0,
+        riskLevel: 'LOW',
+      },
+    };
+
+    const op = {
+      id: `${replica.id}:op_${Date.now().toString(36)}`,
+      type: 'TASK_CREATE',
+      documentId: 'doc_workspace_main',
+      payload: newTask,
+      meta: {
+        replicaId: replica.id,
+        baseVersion: replica.version,
+        timestamp: Date.now(),
+      },
+    };
+
+    try {
+      await saveTaskLocally(replica.id, newTask);
+      const localOpId = await queuePendingOperation(replica.id, op);
+
+      set((curr) => {
+        const nextReplica = {
+          ...curr[replicaKey],
+          tasks: [...curr[replicaKey].tasks, newTask],
+          pendingOps: [...curr[replicaKey].pendingOps, { ...op, localId: localOpId }],
+        };
+
+        const replicaA = replicaKey === 'replicaA' ? nextReplica : curr.replicaA;
+        const replicaB = replicaKey === 'replicaB' ? nextReplica : curr.replicaB;
+
+        const derived = deriveTruthfulDialState(replicaA, replicaB, curr.conflicts);
+
+        return {
+          [replicaKey]: nextReplica,
+          ...derived,
+        };
+      });
+    } catch (err) {
+      console.error('Failed to create custom task in IndexedDB:', err);
+    }
+  },
+
   // --------------------------------------------------------------------------
   // Navigation & Page Switching
   // --------------------------------------------------------------------------
@@ -455,26 +640,13 @@ export const useSyncStore = create((set, get) => ({
   },
 
   // --------------------------------------------------------------------------
-  // Theme Switching (Observatory Light & Dark Astrolabe)
-  // --------------------------------------------------------------------------
-  setTheme: (theme) => {
-    if (typeof localStorage !== 'undefined') {
-      localStorage.setItem('nexussync_theme', theme);
-    }
-    if (typeof document !== 'undefined') {
-      document.documentElement.setAttribute('data-theme', theme);
-      if (theme === 'dark') {
-        document.documentElement.classList.add('dark');
-      } else {
-        document.documentElement.classList.remove('dark');
-      }
-    }
-    set({ theme });
+  // Fixed Pearl × Deep Teal Theme
+  setTheme: () => {
+    set({ theme: 'light' });
   },
 
   toggleTheme: () => {
-    const nextTheme = get().theme === 'dark' ? 'light' : 'dark';
-    get().setTheme(nextTheme);
+    // Theme is fixed to Pearl × Deep Teal
   },
 
   // --------------------------------------------------------------------------
@@ -484,23 +656,31 @@ export const useSyncStore = create((set, get) => ({
     const isChief = (userData.role || '').toUpperCase().includes('CHIEF') ||
                     (userData.role || '').toUpperCase().includes('ARBITER') ||
                     userData.isAdmin === true;
-    set({
-      user: {
-        id: userData.id || 'op_custom',
-        name: userData.name || 'Station Operator',
-        email: userData.email || 'operator@nexussync.org',
-        role: userData.role || (isChief ? 'CHIEF OPERATOR' : 'PEER OPERATOR'),
-        replicaId: userData.replicaId || 'r_operator_primary',
-        region: userData.region || 'local-isolated (Enclave)',
-        isAdmin: isChief,
-        accessLevel: isChief ? 'TIER-0 ARBITER' : 'PEER QUORUM',
-        authMode: 'LOCAL / DEMO',
-        sessionType: 'LOCAL OPERATOR',
-        ed25519Fingerprint: userData.ed25519Fingerprint || '7F8C·914B·22D1·D91A',
-        isAuthenticated: true,
-        sessionStartedAt: Date.now(),
-      },
-    });
+    const sessionUser = {
+      id: userData.id || 'op_custom',
+      name: userData.name || 'Station Operator',
+      email: userData.email || 'operator@nexussync.org',
+      role: userData.role || (isChief ? 'CHIEF OPERATOR' : 'PEER OPERATOR'),
+      replicaId: userData.replicaId || 'r_operator_primary',
+      region: userData.region || 'local-isolated (Enclave)',
+      isAdmin: isChief,
+      accessLevel: isChief ? 'TIER-0 ARBITER' : 'PEER QUORUM',
+      authMode: 'LOCAL / DEMO',
+      sessionType: 'LOCAL OPERATOR',
+      ed25519Fingerprint: userData.ed25519Fingerprint || '7F8C·914B·22D1·D91A',
+      isAuthenticated: true,
+      sessionStartedAt: Date.now(),
+    };
+
+    if (typeof sessionStorage !== 'undefined') {
+      try {
+        sessionStorage.setItem('nexussync_session', JSON.stringify(sessionUser));
+      } catch (err) {
+        console.warn('Could not store session in sessionStorage:', err);
+      }
+    }
+
+    set({ user: sessionUser });
   },
 
   signup: (userData) => {
@@ -508,21 +688,40 @@ export const useSyncStore = create((set, get) => ({
   },
 
   logout: () => {
+    if (typeof sessionStorage !== 'undefined') {
+      try {
+        sessionStorage.removeItem('nexussync_session');
+      } catch (err) {
+        console.warn('Could not remove session from sessionStorage:', err);
+      }
+    }
     set({
       user: null,
+      activePage: 'login',
     });
+    if (typeof window !== 'undefined') {
+      window.location.hash = 'login';
+    }
   },
 
   elevateToAdmin: () => {
     set((state) => {
       if (!state.user) return state;
+      const updatedUser = {
+        ...state.user,
+        isAdmin: true,
+        role: 'CHIEF OPERATOR',
+        accessLevel: 'TIER-0 ARBITER',
+      };
+      if (typeof sessionStorage !== 'undefined') {
+        try {
+          sessionStorage.setItem('nexussync_session', JSON.stringify(updatedUser));
+        } catch {
+          // Ignore
+        }
+      }
       return {
-        user: {
-          ...state.user,
-          isAdmin: true,
-          role: 'CHIEF OPERATOR',
-          accessLevel: 'TIER-0 ARBITER',
-        },
+        user: updatedUser,
       };
     });
   },

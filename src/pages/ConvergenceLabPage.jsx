@@ -1,10 +1,19 @@
+import { useState } from 'react';
 import { useSyncStore } from '../store/useSyncStore';
+import { PageHeader } from '../components/layout/PageHeader';
 import {
+  Radio,
   Sliders,
-  Zap,
-  Shuffle,
-  GitBranch,
-  Radio
+  WifiOff,
+  Wifi,
+  FileEdit,
+  GitFork,
+  ShieldCheck,
+  RotateCcw,
+  Activity,
+  Layers,
+  CheckCircle2,
+  AlertTriangle
 } from 'lucide-react';
 
 export function ConvergenceLabPage() {
@@ -13,331 +22,401 @@ export function ConvergenceLabPage() {
     setNetworkDriftMs,
     chaosFlags,
     toggleChaosFlag,
-    triggerCatastrophe,
-    chaosEvents,
     replicaA,
     replicaB,
+    toggleReplicaOnline,
+    setActivePage,
   } = useSyncStore();
 
-  const handlePresetTrigger = (preset) => {
-    triggerCatastrophe(preset);
+  const [activeStep, setActiveStep] = useState(1);
+  const [simLog, setSimLog] = useState([
+    { id: '1', time: '14:20:01', text: 'Sandbox replicas initialized with identical Merkle roots.' },
+  ]);
+
+  const addLog = (text) => {
+    setSimLog((prev) => [
+      { id: Date.now().toString(), time: new Date().toLocaleTimeString(), text },
+      ...prev.slice(0, 8),
+    ]);
+  };
+
+  const handleStepClick = (stepNum) => {
+    setActiveStep(stepNum);
+    if (stepNum === 1) {
+      if (replicaB.effectiveOnline) toggleReplicaOnline('replicaB');
+      addLog('SIMULATION: Severed gossip socket to Replica B (Marcus Chen). Partition active.');
+    } else if (stepNum === 2) {
+      addLog('SIMULATION: Forked state delta created: Node A set dueDate="Nov 04", Node B set dueDate="Nov 19".');
+    } else if (stepNum === 3) {
+      if (!replicaB.effectiveOnline) toggleReplicaOnline('replicaB');
+      addLog('SIMULATION: Reconnected network. Outbound vector queues streaming across mesh.');
+    } else if (stepNum === 4) {
+      addLog('SIMULATION: Conflict Detector flagged 2 diverged fields: dueDate and priority.');
+    } else if (stepNum === 5) {
+      addLog('SIMULATION: Join semilattice computed least upper bound (LUB). All nodes converged.');
+    }
+  };
+
+  const resetSimulation = () => {
+    setActiveStep(1);
+    if (!replicaB.effectiveOnline) toggleReplicaOnline('replicaB');
+    addLog('SIMULATION: Reset scenario. Replicas restored to verified sync.');
   };
 
   return (
-    <div className="flex flex-col gap-8 w-full animate-in fade-in duration-300">
-      {/* 1. EDITORIAL HEADER & FIELD NOTE */}
-      <section className="border-b border-[var(--line)] pb-6">
-        <div className="flex flex-col md:flex-row md:items-end justify-between gap-6">
-          <div className="space-y-2 max-w-3xl">
-            <div className="flex items-center gap-2">
-              <span className="font-mono text-[10px] uppercase tracking-widest text-[var(--copper)] px-2 py-0.5 bg-[var(--paper-raised)] border border-[var(--border)] rounded font-bold">
-                01 / EMPIRICAL LAB &amp; CHAOS SIMULATOR
-              </span>
-              <span className="w-8 h-[1px] bg-[var(--line)]" />
-              <span className="font-mono text-[10px] text-[var(--ink-faint)]">SUB-SPEC 994.2026.CRDT</span>
+    <div className="flex flex-col gap-6 w-full max-w-7xl mx-auto animate-in fade-in duration-300">
+      {/* 1. UNIFIED PAGE HEADER */}
+      <PageHeader
+        breadcrumbs={['Workspace', 'Network Simulation']}
+        title="Network Simulation"
+        badge={
+          <span className="px-2.5 py-0.5 rounded-full bg-[#FAF5EC] text-[#C4872D] font-mono text-xs font-semibold">
+            Advanced Sandbox
+          </span>
+        }
+        description="Actions executed here simulate Byzantine packet drops, split-brain network partitions, and asynchronous state divergence without altering production state vectors."
+        action={
+          <div className="flex items-center gap-3">
+            <div className="hidden sm:flex items-center gap-3 px-3 py-1.5 rounded-xl bg-[#F0F4F2] border border-[#DCE5E1] text-xs font-mono">
+              <span className="text-[#697775]">Clocks:</span>
+              <span className="font-semibold text-[#15201F]">A:{replicaA.version} · B:{replicaB.version}</span>
             </div>
-            <h1 className="font-display text-4xl sm:text-5xl text-[var(--ink)] tracking-tight leading-tight">
-              Empirical <span className="italic text-[var(--copper)] font-normal">Chaos</span> &amp; Invariant Laboratory
-            </h1>
-            <p className="font-newsreader text-base sm:text-lg text-[var(--ink-soft)] max-w-2xl">
-              Inject arbitrary network partitions, asymmetric latency, and bit-level packet reordering across simulated regional clusters. Verify real-time monotonic state convergence against 128-bit Merkle invariants.
-            </p>
+            <button
+              type="button"
+              onClick={resetSimulation}
+              className="inline-flex items-center justify-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-[#F0F4F2] hover:bg-[#DCE5E1] text-[#15201F] font-sans text-xs font-semibold transition cursor-pointer border border-[#DCE5E1]"
+            >
+              <RotateCcw className="w-3.5 h-3.5 text-[#176D70]" />
+              <span>Reset Scenario</span>
+            </button>
           </div>
+        }
+      />
 
-          {/* Tactical Handwriting / Field Note #714 */}
-          <div className="bg-[var(--paper-raised)] border border-[var(--border)] p-4 rounded-lg shadow-xs max-w-xs self-start md:-rotate-2 transition-transform hover:rotate-0 duration-300 shrink-0">
-            <div className="flex items-center gap-1.5 text-[var(--copper)] mb-1">
-              <Radio className="w-3.5 h-3.5" />
-              <span className="font-mono text-[10px] uppercase font-bold tracking-wider">Field Note #714</span>
-            </div>
-            <p className="font-newsreader text-sm italic text-[var(--ink)] leading-snug">
-              “stress testing up to 100,000 asynchronous partitions under asymmetric churn”
-            </p>
-            <div className="font-mono text-[9px] text-[var(--ink-faint)] mt-1">Calibrated at Zenith Ref: 104.28 GHz</div>
-          </div>
-        </div>
-      </section>
-
-      {/* 2. CHAOS CONTROL CONSOLE (4 COLS) & CLUSTER TOPOLOGY MESH (8 COLS) */}
+      {/* 2. INTERACTIVE SANDBOX WORKSPACE (2 COLS) */}
       <section className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-        {/* Left Column: Fault Injection Console (4 cols) */}
-        <div className="lg:col-span-5 flex flex-col gap-4">
-          <div className="bg-[var(--paper-raised)] border border-[var(--border)] rounded-xl p-6 shadow-xs space-y-6">
-            <div className="flex items-center justify-between border-b border-[var(--line)] pb-3">
+        {/* Left Column: Lifecycle Stepper & Modulators (5 Cols) */}
+        <div className="lg:col-span-5 flex flex-col gap-6">
+          {/* Stepper Card */}
+          <div className="rounded-2xl bg-[#FFFFFF] border border-[#DCE5E1] shadow-xs p-6 flex flex-col gap-4">
+            <div className="flex items-center justify-between pb-2 border-b border-[#DCE5E1]">
               <div className="flex items-center gap-2">
-                <Sliders className="w-4 h-4 text-[var(--copper)]" />
-                <span className="font-mono text-xs uppercase font-bold text-[var(--ink)] tracking-wide">
-                  Fault Injection Deck
-                </span>
+                <Radio className="w-4 h-4 text-[#176D70]" />
+                <h2 className="font-display text-lg text-[#15201F] font-bold">
+                  Lifecycle Test Steps
+                </h2>
               </div>
-              <span className="font-mono text-[10px] text-[var(--copper)] font-bold px-2 py-0.5 rounded bg-[var(--copper)]/10">
-                CHAOS: ENGAGED
+              <span className="font-mono text-[10px] px-2.5 py-0.5 rounded-full bg-[#F0F4F2] text-[#176D70] font-semibold">
+                Step {activeStep} of 5 Active
               </span>
             </div>
 
-            {/* Artificial Latency Slider */}
-            <div className="space-y-2">
-              <div className="flex items-baseline justify-between font-mono text-xs">
-                <span className="uppercase text-[var(--ink-soft)] text-[10px] tracking-wider">Artificial Network Drift</span>
-                <span className="font-bold text-[var(--copper)] text-base">{networkDriftMs} ms</span>
+            <p className="font-sans text-xs text-[#697775]">
+              Trigger synchronization events sequentially to evaluate Lamport timestamps and automated three-way CRDT resolution under partition strain.
+            </p>
+
+            {/* Step Buttons */}
+            <div className="flex flex-col gap-2 pt-1">
+              {/* Step 1 */}
+              <button
+                type="button"
+                onClick={() => handleStepClick(1)}
+                className={`w-full text-left p-3 rounded-xl transition-all flex items-center justify-between border cursor-pointer ${
+                  activeStep === 1
+                    ? 'bg-[#E4F1EF] border-[#176D70] shadow-xs'
+                    : 'bg-[#F0F4F2]/50 border-[#DCE5E1] hover:bg-[#F0F4F2]'
+                }`}
+              >
+                <div className="flex items-center gap-3 min-w-0">
+                  <span className={`w-6 h-6 rounded-full font-mono text-xs flex items-center justify-center font-bold shrink-0 ${
+                    activeStep === 1 ? 'bg-[#176D70] text-white' : 'bg-[#DCE5E1] text-[#697775]'
+                  }`}>
+                    1
+                  </span>
+                  <div className="flex flex-col truncate">
+                    <span className="font-sans text-xs text-[#15201F] font-semibold truncate">
+                      Step 1: Partition Replica B
+                    </span>
+                    <span className="font-sans text-[11px] text-[#697775] truncate">
+                      Sever inbound/outbound packets to Marcus
+                    </span>
+                  </div>
+                </div>
+                <WifiOff className="w-4 h-4 text-[#176D70] shrink-0" />
+              </button>
+
+              {/* Step 2 */}
+              <button
+                type="button"
+                onClick={() => handleStepClick(2)}
+                className={`w-full text-left p-3 rounded-xl transition-all flex items-center justify-between border cursor-pointer ${
+                  activeStep === 2
+                    ? 'bg-[#E4F1EF] border-[#176D70] shadow-xs'
+                    : 'bg-[#F0F4F2]/50 border-[#DCE5E1] hover:bg-[#F0F4F2]'
+                }`}
+              >
+                <div className="flex items-center gap-3 min-w-0">
+                  <span className={`w-6 h-6 rounded-full font-mono text-xs flex items-center justify-center font-bold shrink-0 ${
+                    activeStep === 2 ? 'bg-[#176D70] text-white' : 'bg-[#DCE5E1] text-[#697775]'
+                  }`}>
+                    2
+                  </span>
+                  <div className="flex flex-col truncate">
+                    <span className="font-sans text-xs text-[#15201F] font-semibold truncate">
+                      Step 2: Make Concurrent Edits
+                    </span>
+                    <span className="font-sans text-[11px] text-[#697775] truncate">
+                      Fork state delta: Elena vs. Marcus in disconnected mode
+                    </span>
+                  </div>
+                </div>
+                <FileEdit className="w-4 h-4 text-[#176D70] shrink-0" />
+              </button>
+
+              {/* Step 3 */}
+              <button
+                type="button"
+                onClick={() => handleStepClick(3)}
+                className={`w-full text-left p-3 rounded-xl transition-all flex items-center justify-between border cursor-pointer ${
+                  activeStep === 3
+                    ? 'bg-[#E4F1EF] border-[#176D70] shadow-xs'
+                    : 'bg-[#F0F4F2]/50 border-[#DCE5E1] hover:bg-[#F0F4F2]'
+                }`}
+              >
+                <div className="flex items-center gap-3 min-w-0">
+                  <span className={`w-6 h-6 rounded-full font-mono text-xs flex items-center justify-center font-bold shrink-0 ${
+                    activeStep === 3 ? 'bg-[#176D70] text-white' : 'bg-[#DCE5E1] text-[#697775]'
+                  }`}>
+                    3
+                  </span>
+                  <div className="flex flex-col truncate">
+                    <span className="font-sans text-xs text-[#15201F] font-semibold truncate">
+                      Step 3: Reconnect Network
+                    </span>
+                    <span className="font-sans text-[11px] text-[#697775] truncate">
+                      Re-establish gossip transport &amp; stream vector queues
+                    </span>
+                  </div>
+                </div>
+                <Wifi className="w-4 h-4 text-[#176D70] shrink-0" />
+              </button>
+
+              {/* Step 4 */}
+              <button
+                type="button"
+                onClick={() => handleStepClick(4)}
+                className={`w-full text-left p-3 rounded-xl transition-all flex items-center justify-between border cursor-pointer ${
+                  activeStep === 4
+                    ? 'bg-[#E4F1EF] border-[#176D70] shadow-xs'
+                    : 'bg-[#F0F4F2]/50 border-[#DCE5E1] hover:bg-[#F0F4F2]'
+                }`}
+              >
+                <div className="flex items-center gap-3 min-w-0">
+                  <span className={`w-6 h-6 rounded-full font-mono text-xs flex items-center justify-center font-bold shrink-0 ${
+                    activeStep === 4 ? 'bg-[#176D70] text-white' : 'bg-[#DCE5E1] text-[#697775]'
+                  }`}>
+                    4
+                  </span>
+                  <div className="flex flex-col truncate">
+                    <span className="font-sans text-xs text-[#15201F] font-semibold truncate">
+                      Step 4: Trigger Conflict Detector
+                    </span>
+                    <span className="font-sans text-[11px] text-[#697775] truncate">
+                      Compute causal divergence &amp; 3-way ancestor diff
+                    </span>
+                  </div>
+                </div>
+                <GitFork className="w-4 h-4 text-[#176D70] shrink-0" />
+              </button>
+
+              {/* Step 5 */}
+              <button
+                type="button"
+                onClick={() => handleStepClick(5)}
+                className={`w-full text-left p-3 rounded-xl transition-all flex items-center justify-between border cursor-pointer ${
+                  activeStep === 5
+                    ? 'bg-[#E4F1EF] border-[#176D70] shadow-xs'
+                    : 'bg-[#F0F4F2]/50 border-[#DCE5E1] hover:bg-[#F0F4F2]'
+                }`}
+              >
+                <div className="flex items-center gap-3 min-w-0">
+                  <span className={`w-6 h-6 rounded-full font-mono text-xs flex items-center justify-center font-bold shrink-0 ${
+                    activeStep === 5 ? 'bg-[#176D70] text-white' : 'bg-[#DCE5E1] text-[#697775]'
+                  }`}>
+                    5
+                  </span>
+                  <div className="flex flex-col truncate">
+                    <span className="font-sans text-xs text-[#15201F] font-semibold truncate">
+                      Step 5: Execute Convergence Proof
+                    </span>
+                    <span className="font-sans text-[11px] text-[#697775] truncate">
+                      Merge State Tree through CRDT lattice math
+                    </span>
+                  </div>
+                </div>
+                <ShieldCheck className="w-4 h-4 text-[#176D70] shrink-0" />
+              </button>
+            </div>
+          </div>
+
+          {/* Fault Modulators Card */}
+          <div className="rounded-2xl bg-[#FFFFFF] border border-[#DCE5E1] shadow-xs p-6 flex flex-col gap-4">
+            <div className="flex items-center justify-between pb-2 border-b border-[#DCE5E1]">
+              <div className="flex items-center gap-2">
+                <Sliders className="w-4 h-4 text-[#176D70]" />
+                <h3 className="font-display text-lg text-[#15201F] font-bold">
+                  Fault Injection Modulators
+                </h3>
+              </div>
+              <span className="font-mono text-[10px] px-2 py-0.5 rounded-full bg-[#F0F4F2] text-[#697775]">
+                SIMULATION ONLY
+              </span>
+            </div>
+
+            {/* Latency Slider */}
+            <div className="flex flex-col gap-2">
+              <div className="flex justify-between font-mono text-xs">
+                <span className="text-[#697775]">Synthetic Latency Drift</span>
+                <span className="font-bold text-[#176D70]">{networkDriftMs} ms</span>
               </div>
               <input
                 type="range"
                 min="0"
-                max="2000"
+                max="1000"
                 step="20"
                 value={networkDriftMs}
                 onChange={(e) => setNetworkDriftMs(Number(e.target.value))}
-                className="w-full accent-[var(--copper)] cursor-pointer"
+                className="w-full accent-[#176D70] cursor-pointer"
               />
-              <div className="flex justify-between font-mono text-[9px] text-[var(--ink-faint)] px-1 select-none">
-                <span>0ms</span>
-                <span>500ms</span>
-                <span>1000ms</span>
-                <span>1500ms</span>
-                <span>2000ms</span>
-              </div>
             </div>
 
-            {/* Mechanical Fault Toggles */}
-            <div className="space-y-2">
-              <span className="font-mono text-[10px] text-[var(--ink-faint)] uppercase tracking-widest block">
-                Network Mutation Flags
-              </span>
-
-              {/* Toggle 1: Drop Packets */}
+            {/* Toggle Flags */}
+            <div className="flex flex-col gap-2 pt-2">
               <label
                 onClick={() => toggleChaosFlag('dropPackets')}
-                className="flex items-center justify-between p-3 rounded-lg bg-[var(--paper)] border border-[var(--border)] shadow-2xs cursor-pointer hover:border-[var(--line)] transition-colors"
+                className="flex items-center justify-between p-3 rounded-xl bg-[#F0F4F2] border border-[#DCE5E1] cursor-pointer"
               >
                 <div className="flex flex-col">
-                  <span className="font-sans text-xs font-semibold text-[var(--ink)]">Drop Packets (25% loss)</span>
-                  <span className="font-mono text-[10px] text-[var(--rust)]">Simulated stochastic link sever</span>
+                  <span className="font-sans text-xs font-semibold text-[#15201F]">Drop Packets (25% loss)</span>
+                  <span className="font-sans text-[11px] text-[#B94A48]">Stochastic link sever simulation</span>
                 </div>
                 <input
                   type="checkbox"
                   checked={chaosFlags.dropPackets}
                   readOnly
-                  className="w-4 h-4 accent-[var(--copper)] cursor-pointer"
+                  className="w-4 h-4 accent-[#176D70]"
                 />
               </label>
 
-              {/* Toggle 2: Duplicate Op Deliveries */}
               <label
                 onClick={() => toggleChaosFlag('duplicateOps')}
-                className="flex items-center justify-between p-3 rounded-lg bg-[var(--paper)] border border-[var(--border)] shadow-2xs cursor-pointer hover:border-[var(--line)] transition-colors"
+                className="flex items-center justify-between p-3 rounded-xl bg-[#F0F4F2] border border-[#DCE5E1] cursor-pointer"
               >
                 <div className="flex flex-col">
-                  <span className="font-sans text-xs font-semibold text-[var(--ink)]">Duplicate Op Deliveries</span>
-                  <span className="font-mono text-[10px] text-[var(--ink-soft)]">Replay attack / ghost duplicate echo</span>
+                  <span className="font-sans text-xs font-semibold text-[#15201F]">Duplicate Op Deliveries</span>
+                  <span className="font-sans text-[11px] text-[#697775]">Replay attack / ghost duplicate echo</span>
                 </div>
                 <input
                   type="checkbox"
                   checked={chaosFlags.duplicateOps}
                   readOnly
-                  className="w-4 h-4 accent-[var(--copper)] cursor-pointer"
+                  className="w-4 h-4 accent-[#176D70]"
                 />
               </label>
-
-              {/* Toggle 3: Out-of-Order */}
-              <label
-                onClick={() => toggleChaosFlag('outOfOrder')}
-                className="flex items-center justify-between p-3 rounded-lg bg-[var(--paper)] border border-[var(--border)] shadow-2xs cursor-pointer hover:border-[var(--line)] transition-colors"
-              >
-                <div className="flex flex-col">
-                  <span className="font-sans text-xs font-semibold text-[var(--ink)]">Arbitrary Out-of-Order</span>
-                  <span className="font-mono text-[10px] text-[var(--ochre)]">Entropy shuffling of Lamport vectors</span>
-                </div>
-                <input
-                  type="checkbox"
-                  checked={chaosFlags.outOfOrder}
-                  readOnly
-                  className="w-4 h-4 accent-[var(--copper)] cursor-pointer"
-                />
-              </label>
-
-              {/* Toggle 4: Asymmetric Partition */}
-              <label
-                onClick={() => toggleChaosFlag('asymmetricPartition')}
-                className="flex items-center justify-between p-3 rounded-lg bg-[var(--paper)] border border-[var(--border)] shadow-2xs cursor-pointer hover:border-[var(--line)] transition-colors"
-              >
-                <div className="flex flex-col">
-                  <span className="font-sans text-xs font-semibold text-[var(--ink)]">Asymmetric Partition</span>
-                  <span className="font-mono text-[10px] text-[var(--ink-faint)]">Bipartite split-brain Tokyo &amp; London</span>
-                </div>
-                <input
-                  type="checkbox"
-                  checked={chaosFlags.asymmetricPartition}
-                  readOnly
-                  className="w-4 h-4 accent-[var(--copper)] cursor-pointer"
-                />
-              </label>
-            </div>
-
-            {/* Pre-Engineered Chaos Scenarios */}
-            <div className="pt-2">
-              <span className="font-mono text-[10px] text-[var(--ink-faint)] uppercase tracking-widest block mb-2">
-                Pre-Engineered Catastrophes
-              </span>
-              <div className="grid grid-cols-1 gap-2 font-mono text-xs">
-                <button
-                  onClick={() => handlePresetTrigger('duplicate_storm')}
-                  className="w-full py-2 px-3 text-left bg-[var(--paper)] hover:bg-[var(--copper)] hover:text-[var(--paper-raised)] border border-[var(--border)] text-[var(--ink)] rounded flex items-center justify-between transition-colors shadow-2xs cursor-pointer"
-                >
-                  <span>• Duplicate Storm (10k ops)</span>
-                  <Zap className="w-3.5 h-3.5 text-[var(--ochre)]" />
-                </button>
-                <button
-                  onClick={() => handlePresetTrigger('split_brain')}
-                  className="w-full py-2 px-3 text-left bg-[var(--paper)] hover:bg-[var(--copper)] hover:text-[var(--paper-raised)] border border-[var(--border)] text-[var(--ink)] rounded flex items-center justify-between transition-colors shadow-2xs cursor-pointer"
-                >
-                  <span>• Split-Brain Partition</span>
-                  <GitBranch className="w-3.5 h-3.5 text-[var(--rust)]" />
-                </button>
-                <button
-                  onClick={() => handlePresetTrigger('reorder_cascade')}
-                  className="w-full py-2 px-3 text-left bg-[var(--paper)] hover:bg-[var(--copper)] hover:text-[var(--paper-raised)] border border-[var(--border)] text-[var(--ink)] rounded flex items-center justify-between transition-colors shadow-2xs cursor-pointer"
-                >
-                  <span>• Reorder Cascade</span>
-                  <Shuffle className="w-3.5 h-3.5 text-[var(--copper)]" />
-                </button>
-              </div>
             </div>
           </div>
         </div>
 
-        {/* Right Column: Cluster Mesh Visualizer & Audit Monitor (7 cols) */}
-        <div className="lg:col-span-7 flex flex-col gap-4">
-          <div className="bg-[var(--paper-raised)] border border-[var(--border)] rounded-xl p-6 shadow-xs space-y-6">
-            <div className="flex items-center justify-between border-b border-[var(--line)] pb-3">
-              <div>
-                <span className="font-mono text-[10px] uppercase text-[var(--copper)] font-bold">
-                  REGIONAL TOPOLOGY MESH
-                </span>
-                <h3 className="font-display text-xl text-[var(--ink)]">3-Cluster Asynchronous Gossip</h3>
+        {/* Right Column: Live Mesh Topology & Simulation Event Stream (7 Cols) */}
+        <div className="lg:col-span-7 flex flex-col gap-6">
+          {/* Live Topology Matrix Card */}
+          <div className="rounded-2xl bg-[#FFFFFF] border border-[#DCE5E1] shadow-xs p-6 flex flex-col gap-4">
+            <div className="flex items-center justify-between pb-2 border-b border-[#DCE5E1]">
+              <div className="flex items-center gap-2">
+                <Activity className="w-4 h-4 text-[#176D70]" />
+                <h3 className="font-display text-lg text-[#15201F] font-bold">
+                  Cluster Topology Status
+                </h3>
               </div>
-              <div className="flex items-center gap-1.5 font-mono text-xs text-[var(--verdigris)]">
-                <span className="w-2 h-2 rounded-full bg-[var(--verdigris)] animate-ping" />
-                <span>MESH HEALTH: SECURE</span>
-              </div>
+              <span className="font-mono text-xs text-[#2F7D68] font-bold flex items-center gap-1">
+                <CheckCircle2 className="w-3.5 h-3.5" /> 2 Peer Replicas Monitored
+              </span>
             </div>
 
-            {/* SVG Cluster Topology Drawing */}
-            <div className="w-full bg-[var(--paper-sunken)] border border-[var(--border)] rounded-lg p-4 relative min-h-[300px] flex items-center justify-center overflow-hidden">
-              <svg className="w-full min-w-[500px] h-64" viewBox="0 0 540 260">
-                {/* Triangular Mesh Coordinate Lines */}
-                <line
-                  x1="120"
-                  y1="80"
-                  x2="420"
-                  y2="80"
-                  stroke="currentColor"
-                  className={chaosFlags.asymmetricPartition ? "text-[var(--rust)]" : "text-[var(--border)]"}
-                  strokeWidth={chaosFlags.asymmetricPartition ? "2" : "1.5"}
-                  strokeDasharray={chaosFlags.asymmetricPartition ? "4 4" : "none"}
-                />
-                <line
-                  x1="120"
-                  y1="80"
-                  x2="270"
-                  y2="210"
-                  stroke="currentColor"
-                  className="text-[var(--border)]"
-                  strokeWidth="1.5"
-                />
-                <line
-                  x1="420"
-                  y1="80"
-                  x2="270"
-                  y2="210"
-                  stroke="currentColor"
-                  className="text-[var(--border)]"
-                  strokeWidth="1.5"
-                />
-
-                {/* Animated Flying Signal Particles */}
-                <circle cx="270" cy="80" r="4" fill="var(--copper)">
-                  <animate attributeName="cx" values="120;420;120" dur="3s" repeatCount="indefinite" />
-                </circle>
-                <circle cx="200" cy="140" r="3" fill="var(--verdigris)">
-                  <animate attributeName="cx" values="120;270;120" dur="2.4s" repeatCount="indefinite" />
-                  <animate attributeName="cy" values="80;210;80" dur="2.4s" repeatCount="indefinite" />
-                </circle>
-
-                {/* Node A: Tokyo (Aarav) */}
-                <g className="cursor-pointer">
-                  <circle cx="120" cy="80" r="28" fill="var(--paper-raised)" stroke="var(--copper)" strokeWidth="2" />
-                  <text x="120" y="75" textAnchor="middle" className="font-mono text-[10px] fill-[var(--ink)] font-bold">NODE A</text>
-                  <text x="120" y="90" textAnchor="middle" className="font-mono text-[8px] fill-[var(--copper)]">Tokyo (Aarav)</text>
-                  <circle cx="120" cy="115" r="3" fill={replicaA.effectiveOnline ? "var(--verdigris)" : "var(--rust)"} />
-                  <text x="120" y="128" textAnchor="middle" className="font-mono text-[7px] fill-[var(--ink-faint)]">
-                    {replicaA.effectiveOnline ? "LIVE" : "PARTITIONED"}
-                  </text>
-                </g>
-
-                {/* Node B: London (Meera) */}
-                <g className="cursor-pointer">
-                  <circle cx="420" cy="80" r="28" fill="var(--paper-raised)" stroke="var(--verdigris)" strokeWidth="2" />
-                  <text x="420" y="75" textAnchor="middle" className="font-mono text-[10px] fill-[var(--ink)] font-bold">NODE B</text>
-                  <text x="420" y="90" textAnchor="middle" className="font-mono text-[8px] fill-[var(--verdigris)]">London (Meera)</text>
-                  <circle cx="420" cy="115" r="3" fill={replicaB.effectiveOnline ? "var(--verdigris)" : "var(--rust)"} />
-                  <text x="420" y="128" textAnchor="middle" className="font-mono text-[7px] fill-[var(--ink-faint)]">
-                    {replicaB.effectiveOnline ? "LIVE" : "PARTITIONED"}
-                  </text>
-                </g>
-
-                {/* Node C: Zurich Gateway (Engine) */}
-                <g className="cursor-pointer">
-                  <circle cx="270" cy="210" r="30" fill="var(--paper-raised)" stroke="var(--ochre)" strokeWidth="2" />
-                  <text x="270" y="206" textAnchor="middle" className="font-mono text-[10px] fill-[var(--ink)] font-bold">NODE C</text>
-                  <text x="270" y="220" textAnchor="middle" className="font-mono text-[8px] fill-[var(--ochre)]">Zurich Gateway</text>
-                </g>
-              </svg>
-            </div>
-
-            {/* Live Invariant Audit Monitor */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 font-mono text-xs">
-              <div className="p-3 rounded bg-[var(--paper)] border border-[var(--border)]">
-                <span className="text-[9px] uppercase text-[var(--ink-faint)] block">128-Bit Merkle Root</span>
-                <div className="font-mono text-[11px] font-bold text-[var(--ink)] mt-0.5 truncate">
-                  e9281a8c88fd12a4
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {/* Replica A Card */}
+              <div className="bg-[#F0F4F2] rounded-xl p-4 border border-[#DCE5E1] flex flex-col gap-2">
+                <div className="flex items-center justify-between">
+                  <span className="font-mono text-xs font-bold text-[#15201F]">Node A (Current)</span>
+                  <span className="px-2 py-0.5 rounded-full bg-[#E4F1EF] text-[#2F7D68] font-mono text-[10px] font-semibold">
+                    {replicaA.effectiveOnline ? 'Connected' : 'Offline'}
+                  </span>
                 </div>
-                <span className="text-[9px] text-[var(--verdigris)] mt-1 block">✓ Cryptographically Aligned</span>
+                <div className="font-mono text-xs text-[#697775]">
+                  <div>Vector Clock: L#{replicaA.version}</div>
+                  <div>Pending Ops: {replicaA.pendingOps?.length || 0}</div>
+                  <div>Partition: active_ops_a</div>
+                </div>
               </div>
-              <div className="p-3 rounded bg-[var(--paper)] border border-[var(--border)]">
-                <span className="text-[9px] uppercase text-[var(--ink-faint)] block">Monotonic Inflation</span>
-                <div className="font-display text-lg text-[var(--copper)] mt-0.5">100.0% Verified</div>
-                <span className="text-[9px] text-[var(--ink-soft)] mt-1 block">Bounded Semilattice</span>
-              </div>
-              <div className="p-3 rounded bg-[var(--paper)] border border-[var(--border)]">
-                <span className="text-[9px] uppercase text-[var(--ink-faint)] block">Idempotent Join</span>
-                <div className="font-display text-lg text-[var(--verdigris)] mt-0.5">1.000000 φ</div>
-                <span className="text-[9px] text-[var(--verdigris)] mt-1 block">Permutation Invariant</span>
+
+              {/* Replica B Card */}
+              <div className="bg-[#F0F4F2] rounded-xl p-4 border border-[#DCE5E1] flex flex-col gap-2">
+                <div className="flex items-center justify-between">
+                  <span className="font-mono text-xs font-bold text-[#15201F]">Node B (Marcus)</span>
+                  <span className={`px-2 py-0.5 rounded-full font-mono text-[10px] font-semibold ${
+                    replicaB.effectiveOnline ? 'bg-[#E4F1EF] text-[#2F7D68]' : 'bg-[#FAF5EC] text-[#C4872D]'
+                  }`}>
+                    {replicaB.effectiveOnline ? 'Connected' : 'Partitioned'}
+                  </span>
+                </div>
+                <div className="font-mono text-xs text-[#697775]">
+                  <div>Vector Clock: L#{replicaB.version}</div>
+                  <div>Pending Ops: {replicaB.pendingOps?.length || 0}</div>
+                  <div>Partition: active_ops_b</div>
+                </div>
               </div>
             </div>
+
+            {/* Jump to Conflict Resolver if at Step 4 */}
+            {activeStep === 4 && (
+              <div className="p-4 bg-[#FAF5EC] rounded-xl border border-[#C4872D]/30 flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2 text-xs font-sans text-[#C4872D] font-medium">
+                  <AlertTriangle className="w-4 h-4 shrink-0" />
+                  <span>Divergence staged in sandbox. Open Resolver to inspect 3-way diff.</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setActivePage('conflicts')}
+                  className="px-3 py-1.5 rounded-lg bg-[#176D70] text-white text-xs font-semibold hover:bg-[#13585A] transition shadow-xs cursor-pointer"
+                >
+                  Open Resolver
+                </button>
+              </div>
+            )}
           </div>
 
-          {/* Real-Time Chaos Event Ledger Stream */}
-          <div className="bg-[var(--paper-raised)] border border-[var(--border)] rounded-xl p-5 shadow-xs space-y-3 font-mono text-xs">
-            <div className="flex items-center justify-between border-b border-[var(--line)] pb-2">
-              <span className="font-bold text-[var(--ink)] uppercase text-[10px]">Chaos Activity Ledger</span>
-              <span className="text-[var(--ink-faint)] text-[9px]">{chaosEvents.length} Recent Log Traces</span>
+          {/* Simulation Event Stream Card */}
+          <div className="rounded-2xl bg-[#FFFFFF] border border-[#DCE5E1] shadow-xs p-6 flex flex-col gap-4">
+            <div className="flex items-center justify-between pb-2 border-b border-[#DCE5E1]">
+              <div className="flex items-center gap-2">
+                <Layers className="w-4 h-4 text-[#176D70]" />
+                <h3 className="font-display text-lg text-[#15201F] font-bold">
+                  Simulation Event Stream
+                </h3>
+              </div>
+              <span className="font-mono text-[10px] text-[#697775]">
+                Realtime Synthetic Ledger
+              </span>
             </div>
 
-            <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
-              {chaosEvents.map((ev) => (
+            <div className="flex flex-col gap-2 font-mono text-xs">
+              {simLog.map((log) => (
                 <div
-                  key={ev.id}
-                  className="p-2 rounded bg-[var(--paper)] border border-[var(--border)] flex items-start justify-between gap-3 text-[11px]"
+                  key={log.id}
+                  className="p-3 rounded-xl bg-[#F0F4F2] border border-[#DCE5E1] flex items-start gap-3"
                 >
-                  <div className="space-y-0.5">
-                    <div className="flex items-center gap-2">
-                      <span className="text-[var(--ink-faint)] text-[9px]">{ev.time}</span>
-                      <span className="font-bold text-[var(--copper)] text-[10px]">{ev.type}</span>
-                    </div>
-                    <p className="text-[var(--ink)] font-sans text-xs">{ev.desc}</p>
-                  </div>
-                  <span className="text-[var(--ink-faint)] text-[10px] shrink-0">L#{ev.lamport}</span>
+                  <span className="text-[#697775] shrink-0">{log.time}</span>
+                  <span className="text-[#15201F]">{log.text}</span>
                 </div>
               ))}
             </div>

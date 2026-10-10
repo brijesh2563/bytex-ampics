@@ -552,9 +552,9 @@ export function AdminPage() {
               {/* Active Operator Card */}
               <div className="p-3 rounded-xl bg-[var(--paper)] border border-[var(--border)] flex items-center justify-between">
                 <div>
-                  <div className="font-bold text-[var(--ink)]">{user.name}</div>
-                  <div className="text-[10px] text-[var(--copper)]">{user.role} (CURRENT SESSION)</div>
-                  <div className="text-[9px] text-[var(--ink-faint)] mt-0.5">FP: {user.ed25519Fingerprint || '7F8C·914B'}</div>
+                  <div className="font-bold text-[var(--ink)]">{user?.name || 'Operator'}</div>
+                  <div className="text-[10px] text-[var(--copper)]">{user?.role || 'OPERATOR'} (CURRENT SESSION)</div>
+                  <div className="text-[9px] text-[var(--ink-faint)] mt-0.5">FP: {user?.ed25519Fingerprint || '7F8C·914B'}</div>
                 </div>
                 <span className="px-2 py-0.5 rounded bg-[var(--verdigris)]/15 text-[var(--verdigris)] text-[9px] font-bold">
                   AUTHENTICATED
