@@ -121,13 +121,46 @@ export async function getPendingOperations(replicaId) {
 
 /**
  * Clears or removes a pending operation once officially confirmed by server.
- * (Will be called in Phase 3 upon receiving server ACK).
  * @param {number} localId
  */
 export async function removePendingOperation(localId) {
   const db = await getDB();
   return db.delete('pending_ops', localId);
 }
+
+/**
+ * Removes an operation by its unique opId.
+ * @param {string} replicaId
+ * @param {string} opId
+ */
+export async function removePendingOperationByOpId(replicaId, opId) {
+  const db = await getDB();
+  const tx = db.transaction('pending_ops', 'readwrite');
+  const index = tx.store.index('replicaId');
+  const ops = await index.getAll(replicaId);
+  for (const op of ops) {
+    if (op.opId === opId || op.id === opId) {
+      await tx.store.delete(op.localId);
+    }
+  }
+  await tx.done;
+}
+
+/**
+ * Clears all pending operations for a replica.
+ * @param {string} replicaId
+ */
+export async function clearPendingOperations(replicaId) {
+  const db = await getDB();
+  const tx = db.transaction('pending_ops', 'readwrite');
+  const index = tx.store.index('replicaId');
+  const ops = await index.getAll(replicaId);
+  for (const op of ops) {
+    await tx.store.delete(op.localId);
+  }
+  await tx.done;
+}
+
 
 /**
  * Sets a key-value pair in sync metadata.

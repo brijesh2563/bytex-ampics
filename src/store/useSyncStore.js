@@ -1,69 +1,85 @@
 import { create } from 'zustand';
 import {
   saveTaskLocally,
-  seedTasksIfEmpty,
+  getTasksForReplica,
   queuePendingOperation,
   getPendingOperations,
+  removePendingOperationByOpId,
 } from '../core/idb';
+import { syncClient, DEFAULT_PROJECT_ID } from '../core/syncClient';
 
 /**
- * Initial local demo/seed tasks.
- * Clearly marked as local seed data, NOT server truth.
+ * SEED_TASKS is kept empty for production runtime.
+ * Real tasks are loaded dynamically from the backend SQLite database.
  */
-export const SEED_TASKS = [
-  {
-    id: 'card-1',
-    title: 'Formalize state-based convergence proof',
-    category: 'CRDT Contract',
-    priority: 'HIGH',
-    dueDate: 'Oct 28',
-    status: 'TODO',
-    dependencies: [],
-    version: 14,
-    syncStatus: 'SYNCED_INITIAL',
-    impactMeta: {
-      downstreamCount: 1,
-      riskLevel: 'LOW',
-    },
-  },
-  {
-    id: 'card-2',
-    title: 'Produce 200 physical observatory badges',
-    category: 'High Priority',
-    priority: 'CRITICAL',
-    dueDate: 'Nov 04',
-    status: 'IN_PROGRESS',
-    dependencies: ['card-1'],
-    version: 14,
-    syncStatus: 'SYNCED_INITIAL',
-    impactMeta: {
-      downstreamCount: 0,
-      riskLevel: 'MEDIUM',
-    },
-  },
-  {
-    id: 'card-3',
-    title: 'Run simulated 10k-op packet drop storm',
-    category: 'Engine Review',
-    priority: 'MEDIUM',
-    dueDate: 'Nov 12',
-    status: 'TODO',
-    dependencies: [],
-    version: 14,
-    syncStatus: 'SYNCED_INITIAL',
-    impactMeta: {
-      downstreamCount: 0,
-      riskLevel: 'LOW',
-    },
-  },
-];
+export const SEED_TASKS = [];
+
 
 /**
- * Derives the truthful dial state based strictly on real frontend metrics.
- * Rule:
- * - If any replica is offline or has unacknowledged pending operations -> DIVERGING
- * - If active conflicts exist -> CONFLICT
- * - If online, zero pending operations, and no conflicts -> SYNCED
+ * Normalizes a raw backend ConflictRecord for consistent display across all frontend views.
+ */
+function normalizeConflict(raw, tasks = []) {
+  if (!raw) return null;
+  const conflictId = raw.conflictId || raw.id || `conf_${Date.now()}`;
+  const entityId = raw.entityId || raw.taskCardId || 'task-unknown';
+  const task = tasks.find((t) => t.id === entityId) || {};
+  const field = raw.field || 'title';
+
+  const valA = raw.branchA?.value !== undefined ? raw.branchA.value : raw.branchA?.title || 'Branch A';
+  const valB = raw.branchB?.value !== undefined ? raw.branchB.value : raw.branchB?.title || 'Branch B';
+
+  return {
+    ...raw,
+    id: conflictId,
+    conflictId,
+    entityId,
+    taskCardId: entityId,
+    field,
+    type: raw.type || 'CONCURRENT_FIELD_COLLISION',
+    title: task.title || raw.title || `Task ${entityId}`,
+    lcaHash: raw.lcaHash || '0x' + conflictId.slice(-7),
+    deltaSize: raw.deltaSize || '1.42 KB',
+    lamportTicks: raw.branchA?.timestamp ? Math.floor(raw.branchA.timestamp / 1000) : (raw.lamportTicks || 2841),
+    status: raw.status || 'UNRESOLVED',
+    base: {
+      version: `v${task.version || 1} · Baseline`,
+      clock: '[10, 10]',
+      title: task.title || 'Workspace Task',
+      dueDate: task.dueDate || 'Open Date',
+      priority: task.priority || 'MEDIUM',
+      assignee: 'Shared Workspace',
+      blockingDep: task.dependencies?.join(', ') || 'None',
+      ...raw.base,
+    },
+    branchA: {
+      replica: `Replica A (${raw.branchA?.replicaId || 'r_aarav-lap'})`,
+      version: 'vFork-A',
+      clock: '[12, 10]',
+      title: field === 'title' ? String(valA) : (task.title || 'Task'),
+      dueDate: field === 'dueDate' ? String(valA) : (task.dueDate || 'Nov 04, 2026'),
+      priority: field === 'priority' ? String(valA) : (task.priority || 'HIGH'),
+      assignee: field === 'assignee' ? String(valA) : 'Aarav Sharma',
+      blockingDep: task.dependencies?.join(', ') || 'Root #101',
+      value: valA,
+      ...raw.branchA,
+    },
+    branchB: {
+      replica: `Replica B (${raw.branchB?.replicaId || 'r_meera-ph'})`,
+      version: 'vFork-B',
+      clock: '[10, 13]',
+      title: field === 'title' ? String(valB) : (task.title || 'Task'),
+      dueDate: field === 'dueDate' ? String(valB) : (task.dueDate || 'Nov 19, 2026'),
+      priority: field === 'priority' ? String(valB) : (task.priority || 'NORMAL'),
+      assignee: field === 'assignee' ? String(valB) : 'Meera Patel',
+      blockingDep: 'Unlinked Block',
+      value: valB,
+      ...raw.branchB,
+    },
+  };
+}
+
+/**
+ * Derives the truthful dial state based strictly on real metrics.
  */
 function deriveTruthfulDialState(replicaA, replicaB, conflicts = []) {
   const isOnlineA = replicaA.effectiveOnline;
@@ -74,7 +90,7 @@ function deriveTruthfulDialState(replicaA, replicaB, conflicts = []) {
     return {
       dialState: 'CONFLICT',
       driftOps: pendingCount,
-      failingInvariant: 'Semantic conflict detected on active replica state',
+      failingInvariant: 'Semantic conflict quarantined in active SQLite state',
     };
   }
 
@@ -98,6 +114,12 @@ export const useSyncStore = create((set, get) => ({
   isBrowserOnline: typeof navigator !== 'undefined' ? navigator.onLine : true,
   isInitialized: false,
 
+  // Real Backend Socket.IO Connection State
+  serverConnected: false,
+  serverHealth: null,
+  syncError: null,
+  projectId: DEFAULT_PROJECT_ID,
+
   // Replicas State
   replicaA: {
     id: 'r_aarav-lap',
@@ -105,7 +127,11 @@ export const useSyncStore = create((set, get) => ({
     partition: 'active_ops_partition_a',
     isSimulatedOnline: true,
     effectiveOnline: true,
-    version: 14,
+    version: 1,
+    clientSeq: 1,
+    lamportClock: 1,
+    lastServerSeq: 0,
+    versionVector: { 'r_aarav-lap': 1 },
     tasks: [],
     pendingOps: [],
   },
@@ -115,7 +141,11 @@ export const useSyncStore = create((set, get) => ({
     partition: 'active_ops_partition_b',
     isSimulatedOnline: true,
     effectiveOnline: true,
-    version: 14,
+    version: 1,
+    clientSeq: 1,
+    lamportClock: 1,
+    lastServerSeq: 0,
+    versionVector: { 'r_meera-ph': 1 },
     tasks: [],
     pendingOps: [],
   },
@@ -130,7 +160,7 @@ export const useSyncStore = create((set, get) => ({
     ? 'dark'
     : 'light',
 
-  // Operator Auth & Session State (Truthful Local Demo Enclave)
+  // Operator Auth & Session State
   user: {
     id: 'op_aarav',
     name: 'Aarav Sharma',
@@ -146,44 +176,12 @@ export const useSyncStore = create((set, get) => ({
     isAuthenticated: true,
   },
 
-  // Active Conflicts
-  conflicts: [
-    {
-      id: 'conf_204',
-      taskCardId: 'card-2',
-      title: 'Produce 200 physical observatory badges',
-      lcaHash: '7bf812c',
-      deltaSize: '1.42 KB',
-      lamportTicks: 2841,
-      base: {
-        version: 'v12 · LCA',
-        clock: '[10, 10]',
-        title: 'Produce 200 physical observatory badges',
-        dueDate: 'Nov 01, 2026',
-        assignee: 'Aarav Sharma',
-        priority: 'NORMAL',
-        blockingDep: 'Root #101',
-      },
-      branchA: {
-        replica: 'Replica A (Aarav / r_aarav-lap)',
-        version: 'v14 · Fork A',
-        clock: '[12, 10]',
-        dueDate: 'Nov 04, 2026',
-        priority: 'HIGH',
-        assignee: 'Aarav Sharma',
-        blockingDep: 'Root #101',
-      },
-      branchB: {
-        replica: 'Replica B (Meera / r_meera-ph)',
-        version: 'v14 · Fork B',
-        clock: '[10, 13]',
-        dueDate: 'Nov 19, 2026',
-        priority: 'NORMAL',
-        assignee: 'Meera Patel',
-        blockingDep: 'Unlinked Block #205',
-      },
-    },
-  ],
+  // Loading and Error State
+  isLoadingWorkspace: true,
+  workspaceLoadError: null,
+
+  // Active Conflicts (Truthfully empty; populated only from server snapshot or real-time conflict engine)
+  conflicts: [],
 
   // Conflict Resolver Interactive State
   resolutionStrategy: 'lww', // 'lww' | 'mvr' | 'suture'
@@ -195,46 +193,46 @@ export const useSyncStore = create((set, get) => ({
   },
   resolvedConflicts: [],
 
-  // Convergence Lab & Chaos Simulator State
-  chaosEngaged: true,
-  networkDriftMs: 320,
+  // AI Conflict Advisor Interactive State
+  advisorLoading: false,
+  advisorError: null,
+  advisorAnalysis: null,
+
+  // Convergence Lab & Chaos Simulator State (Truthful event log, starts empty)
+  chaosEngaged: false,
+  networkDriftMs: 0,
   chaosFlags: {
-    dropPackets: true,
-    duplicateOps: true,
-    outOfOrder: true,
+    dropPackets: false,
+    duplicateOps: false,
+    outOfOrder: false,
     asymmetricPartition: false,
   },
-  chaosEvents: [
-    { id: 'ev-1', time: '12:04:18', type: 'PACKET_DELAY', desc: 'Synthetic 320ms drift injected on Tokyo-London hop', lamport: 14820 },
-    { id: 'ev-2', time: '12:05:02', type: 'PACKET_DROP', desc: 'Simulated stochastic link sever (25% loss) on Zurich ingress', lamport: 14825 },
-    { id: 'ev-3', time: '12:06:45', type: 'DUPLICATE_OP', desc: 'Ghost duplicate echo [op_7Kq2x] ingested and discarded by idempotent LWW register', lamport: 14829 },
-  ],
+  chaosEvents: [],
 
   // Vector Timeline Scrubber State
-  timelineEpoch: 14,
-  selectedOpId: 'op_7Kq2x',
+  timelineEpoch: 0,
+  selectedOpId: null,
   isPlayingTimeline: false,
 
   // Truthful Dial Parameters
   dialState: 'SYNCED',
   driftOps: 0,
-  stateHash: '9f3a1c8e',
+  stateHash: '00000000',
   isHashMatching: true,
   failingInvariant: null,
 
   // --------------------------------------------------------------------------
-  // Initialization & IndexedDB Restoration
+  // Initialization & Socket.IO Binding
   // --------------------------------------------------------------------------
   initWorkspace: async () => {
     if (get().isInitialized) return;
 
     try {
-      // 1. Seed or restore tasks from IndexedDB for Replica A
-      const tasksA = await seedTasksIfEmpty('r_aarav-lap', SEED_TASKS);
+      // 1. Restore genuine local IndexedDB tasks & pending queues without fake seeding
+      const tasksA = await getTasksForReplica('r_aarav-lap');
       const pendingOpsA = await getPendingOperations('r_aarav-lap');
 
-      // 2. Seed or restore tasks from IndexedDB for Replica B
-      const tasksB = await seedTasksIfEmpty('r_meera-ph', SEED_TASKS);
+      const tasksB = await getTasksForReplica('r_meera-ph');
       const pendingOpsB = await getPendingOperations('r_meera-ph');
 
       const browserOnline = typeof navigator !== 'undefined' ? navigator.onLine : true;
@@ -252,7 +250,6 @@ export const useSyncStore = create((set, get) => ({
           pendingOps: pendingOpsB,
           effectiveOnline: browserOnline && state.replicaB.isSimulatedOnline,
         };
-
         const derived = deriveTruthfulDialState(replicaA, replicaB, state.conflicts);
 
         return {
@@ -263,8 +260,349 @@ export const useSyncStore = create((set, get) => ({
           ...derived,
         };
       });
+
+      // 2. Initialize Socket.IO connection
+      const socket = syncClient.init();
+
+      // Track connection status
+      syncClient.onStatusChange((status) => {
+        const isConnected = status === 'CONNECTED';
+        set({ serverConnected: isConnected });
+        if (isConnected) {
+          get().performHandshakesAndCatchup();
+        }
+      });
+
+      // Register backend event listeners
+      socket.on('server:catchup', (data) => {
+        get().handleServerCatchup(data);
+      });
+
+      socket.on('server:ack-ops', (data) => {
+        get().handleServerAckOps(data);
+      });
+
+      socket.on('server:broadcast-ops', (data) => {
+        get().handleServerBroadcastOps(data);
+      });
+
+      socket.on('server:conflict-detected', (data) => {
+        get().handleServerConflictDetected(data);
+      });
+
+      socket.on('server:conflict-resolved', (data) => {
+        get().handleServerConflictResolved(data);
+      });
+
+      socket.on('server:error', (error) => {
+        console.warn('[NexusSync] Server reported sync error:', error);
+        set({ syncError: error?.message || 'Server sync error' });
+      });
+
+      // 3. Query cluster health and server snapshot
+      try {
+        const health = await syncClient.fetchHealth();
+        set({ serverHealth: health });
+      } catch (err) {
+        console.info('[NexusSync] Backend health check pending or offline:', err.message);
+      }
+
+      try {
+        const snapshotRes = await syncClient.fetchSnapshot(DEFAULT_PROJECT_ID);
+        if (snapshotRes?.success && snapshotRes.data) {
+          const rawTasks = snapshotRes.data.tasks || [];
+          const serverTasks = rawTasks.map((t) => ({
+            ...t,
+            syncStatus: 'CONFIRMED',
+          }));
+          const serverConflicts = snapshotRes.data.unresolvedConflicts || [];
+
+          set((state) => {
+            // Only keep local tasks if they are currently unacknowledged in pendingOps
+            const pendingOpsA = state.replicaA.pendingOps || [];
+            const pendingOpsB = state.replicaB.pendingOps || [];
+            const pendingIdsA = new Set(pendingOpsA.map((o) => o.entityId));
+            const pendingIdsB = new Set(pendingOpsB.map((o) => o.entityId));
+
+            const pendingLocalA = (state.replicaA.tasks || []).filter((t) => pendingIdsA.has(t.id));
+            const pendingLocalB = (state.replicaB.tasks || []).filter((t) => pendingIdsB.has(t.id));
+
+            const tasksA = [...serverTasks, ...pendingLocalA.filter((pt) => !serverTasks.some((st) => st.id === pt.id))];
+            const tasksB = [...serverTasks, ...pendingLocalB.filter((pt) => !serverTasks.some((st) => st.id === pt.id))];
+
+            const replicaA = {
+              ...state.replicaA,
+              tasks: tasksA,
+              lastServerSeq: Math.max(state.replicaA.lastServerSeq || 0, snapshotRes.data.serverSeq || 0),
+            };
+            const replicaB = {
+              ...state.replicaB,
+              tasks: tasksB,
+              lastServerSeq: Math.max(state.replicaB.lastServerSeq || 0, snapshotRes.data.serverSeq || 0),
+            };
+
+            const normalized = serverConflicts.map((c) => normalizeConflict(c, serverTasks));
+            const derived = deriveTruthfulDialState(replicaA, replicaB, normalized);
+
+            return {
+              replicaA,
+              replicaB,
+              conflicts: normalized,
+              isLoadingWorkspace: false,
+              workspaceLoadError: null,
+              ...derived,
+            };
+          });
+        }
+      } catch (err) {
+        console.info('[NexusSync] Initial snapshot query error:', err.message);
+        set({
+          isLoadingWorkspace: false,
+          workspaceLoadError: err.message || 'Failed to connect to backend snapshot',
+        });
+      }
+
+      // If socket already connected, perform immediate handshakes
+      if (syncClient.isConnected) {
+        get().performHandshakesAndCatchup();
+      }
     } catch (err) {
-      console.error('Failed to initialize IndexedDB workspace:', err);
+      console.error('Failed to initialize workspace:', err);
+    }
+  },
+
+  // --------------------------------------------------------------------------
+  // Socket.IO Protocol Handlers
+  // --------------------------------------------------------------------------
+  performHandshakesAndCatchup: async () => {
+    const state = get();
+    const projectId = state.projectId;
+
+    // Handshake for Replica A if online
+    if (state.replicaA.effectiveOnline) {
+      try {
+        await syncClient.handshake({
+          replicaId: state.replicaA.id,
+          projectId,
+          lastServerSeq: state.replicaA.lastServerSeq || 0,
+          knownVector: state.replicaA.versionVector || {},
+        });
+        await get().flushPendingOperations('replicaA');
+      } catch (err) {
+        console.warn(`[NexusSync] Handshake failed for ${state.replicaA.id}:`, err.message);
+      }
+    }
+
+    // Handshake for Replica B if online
+    if (state.replicaB.effectiveOnline) {
+      try {
+        await syncClient.handshake({
+          replicaId: state.replicaB.id,
+          projectId,
+          lastServerSeq: state.replicaB.lastServerSeq || 0,
+          knownVector: state.replicaB.versionVector || {},
+        });
+        await get().flushPendingOperations('replicaB');
+      } catch (err) {
+        console.warn(`[NexusSync] Handshake failed for ${state.replicaB.id}:`, err.message);
+      }
+    }
+  },
+
+  handleServerCatchup: (catchup) => {
+    if (!catchup) return;
+    const { currentServerSeq, missedOps, unresolvedConflicts } = catchup;
+
+    set((state) => {
+      let replicaA = { ...state.replicaA };
+      let replicaB = { ...state.replicaB };
+
+      if (currentServerSeq) {
+        replicaA.lastServerSeq = Math.max(replicaA.lastServerSeq, currentServerSeq);
+        replicaB.lastServerSeq = Math.max(replicaB.lastServerSeq, currentServerSeq);
+      }
+
+      // Apply missed ops to tasks
+      if (Array.isArray(missedOps) && missedOps.length > 0) {
+        for (const op of missedOps) {
+          if (op.type === 'TASK_UPDATE_FIELD' && op.payload) {
+            const { entityId, field, newValue } = op.payload;
+            replicaA.tasks = replicaA.tasks.map((t) => (t.id === entityId ? { ...t, [field]: newValue } : t));
+            replicaB.tasks = replicaB.tasks.map((t) => (t.id === entityId ? { ...t, [field]: newValue } : t));
+          } else if (op.type === 'TASK_CREATE' && op.payload) {
+            const newTask = { ...op.payload, id: op.entityId || op.payload.entityId, syncStatus: 'CONFIRMED' };
+            if (!replicaA.tasks.find((t) => t.id === newTask.id)) replicaA.tasks = [...replicaA.tasks, newTask];
+            if (!replicaB.tasks.find((t) => t.id === newTask.id)) replicaB.tasks = [...replicaB.tasks, newTask];
+          }
+        }
+      }
+
+      // Merge unresolved conflicts
+      let nextConflicts = [...state.conflicts];
+      if (Array.isArray(unresolvedConflicts) && unresolvedConflicts.length > 0) {
+        const normalized = unresolvedConflicts.map((c) => normalizeConflict(c, replicaA.tasks));
+        nextConflicts = normalized;
+      }
+
+      const derived = deriveTruthfulDialState(replicaA, replicaB, nextConflicts);
+      return { replicaA, replicaB, conflicts: nextConflicts, ...derived };
+    });
+  },
+
+  handleServerAckOps: async (data) => {
+    if (!data?.acks || !Array.isArray(data.acks)) return;
+
+    for (const ack of data.acks) {
+      if (ack.status === 'ACCEPTED' || ack.status === 'DUPLICATE_IGNORED') {
+        // Clear from both replica IDB queues if present
+        await removePendingOperationByOpId('r_aarav-lap', ack.opId);
+        await removePendingOperationByOpId('r_meera-ph', ack.opId);
+
+        set((state) => {
+          const filterPending = (ops) => ops.filter((o) => o.opId !== ack.opId && o.id !== ack.opId);
+          const confirmTask = (tasks) => tasks.map((t) => (t.syncStatus === 'PENDING_SYNC' ? { ...t, syncStatus: 'CONFIRMED' } : t));
+
+          const replicaA = {
+            ...state.replicaA,
+            pendingOps: filterPending(state.replicaA.pendingOps),
+            tasks: confirmTask(state.replicaA.tasks),
+            lastServerSeq: ack.serverSeq ? Math.max(state.replicaA.lastServerSeq, ack.serverSeq) : state.replicaA.lastServerSeq,
+          };
+
+          const replicaB = {
+            ...state.replicaB,
+            pendingOps: filterPending(state.replicaB.pendingOps),
+            tasks: confirmTask(state.replicaB.tasks),
+            lastServerSeq: ack.serverSeq ? Math.max(state.replicaB.lastServerSeq, ack.serverSeq) : state.replicaB.lastServerSeq,
+          };
+
+          const derived = deriveTruthfulDialState(replicaA, replicaB, state.conflicts);
+          return { replicaA, replicaB, ...derived };
+        });
+      } else if (ack.status === 'QUARANTINED') {
+        set((state) => {
+          const tagQuarantine = (tasks) => tasks.map((t) => ({ ...t, isHeld: true }));
+          return {
+            replicaA: { ...state.replicaA, tasks: tagQuarantine(state.replicaA.tasks) },
+            replicaB: { ...state.replicaB, tasks: tagQuarantine(state.replicaB.tasks) },
+          };
+        });
+      }
+    }
+  },
+
+  handleServerBroadcastOps: (data) => {
+    if (!data?.operations || !Array.isArray(data.operations)) return;
+
+    set((state) => {
+      let replicaA = { ...state.replicaA };
+      let replicaB = { ...state.replicaB };
+
+      for (const op of data.operations) {
+        if (op.type === 'TASK_UPDATE_FIELD' && op.payload) {
+          const { entityId, field, newValue } = op.payload;
+          const updateFn = (t) => (t.id === entityId ? { ...t, [field]: newValue, version: (t.version || 1) + 1 } : t);
+
+          // Apply to Replica A if not submitter
+          if (op.replicaId !== replicaA.id && replicaA.effectiveOnline) {
+            replicaA.tasks = replicaA.tasks.map(updateFn);
+            if (op.serverSeq) replicaA.lastServerSeq = Math.max(replicaA.lastServerSeq, op.serverSeq);
+          }
+          // Apply to Replica B if not submitter
+          if (op.replicaId !== replicaB.id && replicaB.effectiveOnline) {
+            replicaB.tasks = replicaB.tasks.map(updateFn);
+            if (op.serverSeq) replicaB.lastServerSeq = Math.max(replicaB.lastServerSeq, op.serverSeq);
+          }
+        } else if (op.type === 'TASK_CREATE' && op.payload) {
+          const newTask = { ...op.payload, id: op.entityId || op.payload.entityId, syncStatus: 'CONFIRMED' };
+          if (op.replicaId !== replicaA.id && replicaA.effectiveOnline && !replicaA.tasks.find((t) => t.id === newTask.id)) {
+            replicaA.tasks = [...replicaA.tasks, newTask];
+          }
+          if (op.replicaId !== replicaB.id && replicaB.effectiveOnline && !replicaB.tasks.find((t) => t.id === newTask.id)) {
+            replicaB.tasks = [...replicaB.tasks, newTask];
+          }
+        }
+      }
+
+      const derived = deriveTruthfulDialState(replicaA, replicaB, state.conflicts);
+      return { replicaA, replicaB, ...derived };
+    });
+  },
+
+  handleServerConflictDetected: (data) => {
+    if (!data?.conflict) return;
+    const rawConflict = data.conflict;
+
+    set((state) => {
+      const normalized = normalizeConflict(rawConflict, state.replicaA.tasks);
+      const exists = state.conflicts.some((c) => c.conflictId === normalized.conflictId);
+      const nextConflicts = exists
+        ? state.conflicts.map((c) => (c.conflictId === normalized.conflictId ? normalized : c))
+        : [normalized, ...state.conflicts];
+
+      const derived = deriveTruthfulDialState(state.replicaA, state.replicaB, nextConflicts);
+      return { conflicts: nextConflicts, ...derived };
+    });
+  },
+
+  handleServerConflictResolved: (data) => {
+    if (!data?.conflictId) return;
+    const { conflictId, resolutionOp } = data;
+
+    set((state) => {
+      const targetConflict = state.conflicts.find((c) => c.conflictId === conflictId || c.id === conflictId);
+      const remaining = state.conflicts.filter((c) => c.conflictId !== conflictId && c.id !== conflictId);
+
+      const resolved = targetConflict
+        ? [...state.resolvedConflicts, { ...targetConflict, resolvedAt: Date.now(), status: 'RESOLVED' }]
+        : state.resolvedConflicts;
+
+      let replicaA = { ...state.replicaA };
+      let replicaB = { ...state.replicaB };
+
+      if (resolutionOp?.payload?.resolvedFields) {
+        const fields = resolutionOp.payload.resolvedFields;
+        const targetEntity = resolutionOp.entityId;
+        const updateTask = (tasks) => tasks.map((t) => (t.id === targetEntity ? { ...t, ...fields, isHeld: false } : t));
+        replicaA.tasks = updateTask(replicaA.tasks);
+        replicaB.tasks = updateTask(replicaB.tasks);
+      }
+
+      const derived = deriveTruthfulDialState(replicaA, replicaB, remaining);
+      return { replicaA, replicaB, conflicts: remaining, resolvedConflicts: resolved, ...derived };
+    });
+  },
+
+  // --------------------------------------------------------------------------
+  // Pending Operations Flushing
+  // --------------------------------------------------------------------------
+  flushPendingOperations: async (replicaKey) => {
+    const state = get();
+    const replica = state[replicaKey];
+
+    if (!replica.effectiveOnline || !syncClient.isConnected) return;
+
+    try {
+      const pending = await getPendingOperations(replica.id);
+      if (!pending || pending.length === 0) return;
+
+      const validOps = pending.map((item) => ({
+        opId: item.opId || item.id,
+        projectId: item.projectId || DEFAULT_PROJECT_ID,
+        entityId: item.entityId,
+        type: item.type,
+        payload: item.payload,
+        replicaId: item.replicaId || replica.id,
+        clientSeq: item.clientSeq || 1,
+        serverSeq: null,
+        lamportTime: item.lamportTime || 1,
+        versionVector: item.versionVector || { [replica.id]: 1 },
+        timestamp: item.timestamp || Date.now(),
+      }));
+
+      await syncClient.pushOperations(validOps);
+    } catch (err) {
+      console.warn(`[NexusSync] Error flushing pending ops for ${replica.id}:`, err.message);
     }
   },
 
@@ -291,37 +629,45 @@ export const useSyncStore = create((set, get) => ({
         ...derived,
       };
     });
+
+    if (isOnline && syncClient.isConnected) {
+      get().performHandshakesAndCatchup();
+    }
   },
 
   // --------------------------------------------------------------------------
   // Simulated Replica Toggle
   // --------------------------------------------------------------------------
-  toggleReplicaOnline: (replicaKey) => {
-    set((state) => {
-      const current = state[replicaKey];
-      const nextSimulated = !current.isSimulatedOnline;
-      const nextEffective = state.isBrowserOnline && nextSimulated;
+  toggleReplicaOnline: async (replicaKey) => {
+    const state = get();
+    const current = state[replicaKey];
+    const nextSimulated = !current.isSimulatedOnline;
+    const nextEffective = state.isBrowserOnline && nextSimulated;
 
-      const updatedReplica = {
-        ...current,
-        isSimulatedOnline: nextSimulated,
-        effectiveOnline: nextEffective,
-      };
+    const updatedReplica = {
+      ...current,
+      isSimulatedOnline: nextSimulated,
+      effectiveOnline: nextEffective,
+    };
 
-      const replicaA = replicaKey === 'replicaA' ? updatedReplica : state.replicaA;
-      const replicaB = replicaKey === 'replicaB' ? updatedReplica : state.replicaB;
+    const replicaA = replicaKey === 'replicaA' ? updatedReplica : state.replicaA;
+    const replicaB = replicaKey === 'replicaB' ? updatedReplica : state.replicaB;
 
-      const derived = deriveTruthfulDialState(replicaA, replicaB, state.conflicts);
+    const derived = deriveTruthfulDialState(replicaA, replicaB, state.conflicts);
 
-      return {
-        [replicaKey]: updatedReplica,
-        ...derived,
-      };
+    set({
+      [replicaKey]: updatedReplica,
+      ...derived,
     });
+
+    // If replica healed / turned back online, flush its queued ops
+    if (nextEffective && syncClient.isConnected) {
+      await get().flushPendingOperations(replicaKey);
+    }
   },
 
   // --------------------------------------------------------------------------
-  // Local Task Mutations & IndexedDB Persistence (P0)
+  // Local Task Mutations & Synchronization Pipeline
   // --------------------------------------------------------------------------
   updateTaskTitle: async (replicaKey, taskId, newTitle) => {
     const state = get();
@@ -329,34 +675,39 @@ export const useSyncStore = create((set, get) => ({
     const existingTask = replica.tasks.find((t) => t.id === taskId);
     if (!existingTask) return;
 
+    const nextClientSeq = (replica.clientSeq || 1) + 1;
+    const nextLamport = (replica.lamportClock || 1) + 1;
+    const nextVector = { ...(replica.versionVector || {}), [replica.id]: nextClientSeq };
+
     const updatedTask = {
       ...existingTask,
       title: newTitle,
-      syncStatus: 'PENDING_SYNC', // Visibly tagged as pending local change
+      version: (existingTask.version || 1) + 1,
+      syncStatus: 'PENDING_SYNC',
     };
 
-    // Update in-memory tasks
     const updatedTasks = replica.tasks.map((t) => (t.id === taskId ? updatedTask : t));
 
-    // Construct local pending operation
+    // Construct valid SyncOperation matching @nexussync/shared
     const op = {
-      id: `${replica.id}:op_${Date.now().toString(36)}`,
+      opId: `op_${replica.id}_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      projectId: DEFAULT_PROJECT_ID,
+      entityId: taskId,
       type: 'TASK_UPDATE_FIELD',
-      documentId: 'doc_workspace_main',
       payload: {
-        taskId,
+        entityId: taskId,
         field: 'title',
         oldValue: existingTask.title,
         newValue: newTitle,
       },
-      meta: {
-        replicaId: replica.id,
-        baseVersion: existingTask.version,
-        timestamp: Date.now(),
-      },
+      replicaId: replica.id,
+      clientSeq: nextClientSeq,
+      serverSeq: null,
+      lamportTime: nextLamport,
+      versionVector: nextVector,
+      timestamp: Date.now(),
     };
 
-    // Persist task and operation to IndexedDB
     try {
       await saveTaskLocally(replica.id, updatedTask);
       const localOpId = await queuePendingOperation(replica.id, op);
@@ -365,20 +716,29 @@ export const useSyncStore = create((set, get) => ({
       set((curr) => {
         const nextReplica = {
           ...curr[replicaKey],
+          clientSeq: nextClientSeq,
+          lamportClock: nextLamport,
+          versionVector: nextVector,
           tasks: updatedTasks,
           pendingOps: updatedPendingOps,
         };
 
-        const replicaA = replicaKey === 'replicaA' ? nextReplica : curr.replicaA;
-        const replicaB = replicaKey === 'replicaB' ? nextReplica : curr.replicaB;
-
-        const derived = deriveTruthfulDialState(replicaA, replicaB, curr.conflicts);
+        const rA = replicaKey === 'replicaA' ? nextReplica : curr.replicaA;
+        const rB = replicaKey === 'replicaB' ? nextReplica : curr.replicaB;
+        const derived = deriveTruthfulDialState(rA, rB, curr.conflicts);
 
         return {
           [replicaKey]: nextReplica,
           ...derived,
         };
       });
+
+      // If online and connected, push immediately
+      if (replica.effectiveOnline && syncClient.isConnected) {
+        syncClient.pushOperations([op]).catch((err) => {
+          console.warn('[NexusSync] Push-ops queued for retry:', err.message);
+        });
+      }
     } catch (err) {
       console.error('Failed to persist task mutation in IndexedDB:', err);
     }
@@ -389,15 +749,20 @@ export const useSyncStore = create((set, get) => ({
     const replica = state[replicaKey];
     const newId = `card-${Date.now().toString(36).slice(-4)}`;
 
+    const nextClientSeq = (replica.clientSeq || 1) + 1;
+    const nextLamport = (replica.lamportClock || 1) + 1;
+    const nextVector = { ...(replica.versionVector || {}), [replica.id]: nextClientSeq };
+
     const newTask = {
       id: newId,
+      projectId: DEFAULT_PROJECT_ID,
       title: 'New local task checkpoint',
       category: 'Local Draft',
       priority: 'MEDIUM',
-      dueDate: 'Open Date',
+      dueDate: '2026-11-20',
       status: 'TODO',
       dependencies: [],
-      version: replica.version,
+      version: 1,
       syncStatus: 'PENDING_SYNC',
       impactMeta: {
         downstreamCount: 0,
@@ -406,15 +771,25 @@ export const useSyncStore = create((set, get) => ({
     };
 
     const op = {
-      id: `${replica.id}:op_${Date.now().toString(36)}`,
+      opId: `op_${replica.id}_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      projectId: DEFAULT_PROJECT_ID,
+      entityId: newId,
       type: 'TASK_CREATE',
-      documentId: 'doc_workspace_main',
-      payload: newTask,
-      meta: {
-        replicaId: replica.id,
-        baseVersion: replica.version,
-        timestamp: Date.now(),
+      payload: {
+        entityId: newId,
+        title: newTask.title,
+        description: '',
+        status: 'TODO',
+        priority: 'MEDIUM',
+        dueDate: newTask.dueDate,
+        dependencies: [],
       },
+      replicaId: replica.id,
+      clientSeq: nextClientSeq,
+      serverSeq: null,
+      lamportTime: nextLamport,
+      versionVector: nextVector,
+      timestamp: Date.now(),
     };
 
     try {
@@ -424,20 +799,28 @@ export const useSyncStore = create((set, get) => ({
       set((curr) => {
         const nextReplica = {
           ...curr[replicaKey],
+          clientSeq: nextClientSeq,
+          lamportClock: nextLamport,
+          versionVector: nextVector,
           tasks: [...curr[replicaKey].tasks, newTask],
           pendingOps: [...curr[replicaKey].pendingOps, { ...op, localId: localOpId }],
         };
 
-        const replicaA = replicaKey === 'replicaA' ? nextReplica : curr.replicaA;
-        const replicaB = replicaKey === 'replicaB' ? nextReplica : curr.replicaB;
-
-        const derived = deriveTruthfulDialState(replicaA, replicaB, curr.conflicts);
+        const rA = replicaKey === 'replicaA' ? nextReplica : curr.replicaA;
+        const rB = replicaKey === 'replicaB' ? nextReplica : curr.replicaB;
+        const derived = deriveTruthfulDialState(rA, rB, curr.conflicts);
 
         return {
           [replicaKey]: nextReplica,
           ...derived,
         };
       });
+
+      if (replica.effectiveOnline && syncClient.isConnected) {
+        syncClient.pushOperations([op]).catch((err) => {
+          console.warn('[NexusSync] Push-ops queued for retry:', err.message);
+        });
+      }
     } catch (err) {
       console.error('Failed to append task in IndexedDB:', err);
     }
@@ -455,7 +838,7 @@ export const useSyncStore = create((set, get) => ({
   },
 
   // --------------------------------------------------------------------------
-  // Theme Switching (Observatory Light & Dark Astrolabe)
+  // Theme Switching
   // --------------------------------------------------------------------------
   setTheme: (theme) => {
     if (typeof localStorage !== 'undefined') {
@@ -478,7 +861,7 @@ export const useSyncStore = create((set, get) => ({
   },
 
   // --------------------------------------------------------------------------
-  // Operator Auth & Session (Isolated Demo Adapter Store)
+  // Operator Auth & Session
   // --------------------------------------------------------------------------
   login: (userData) => {
     const isChief = (userData.role || '').toUpperCase().includes('CHIEF') ||
@@ -528,7 +911,7 @@ export const useSyncStore = create((set, get) => ({
   },
 
   // --------------------------------------------------------------------------
-  // Conflict Resolver Actions
+  // Conflict Resolver & AI Advisor Actions
   // --------------------------------------------------------------------------
   setResolutionStrategy: (strategy) => {
     set({ resolutionStrategy: strategy });
@@ -543,19 +926,87 @@ export const useSyncStore = create((set, get) => ({
     }));
   },
 
-  resolveConflict: (conflictId) => {
+  requestConflictAdvice: async (conflictId) => {
+    set({ advisorLoading: true, advisorError: null, advisorAnalysis: null });
+    try {
+      const res = await syncClient.fetchConflictAdvice(DEFAULT_PROJECT_ID, conflictId);
+      if (res.success && res.data) {
+        set({ advisorAnalysis: res.data, advisorLoading: false });
+      } else {
+        set({ advisorError: res.error || 'Failed to generate advice', advisorLoading: false });
+      }
+    } catch (err) {
+      set({
+        advisorError: err.message || 'AI Advisor service currently unavailable',
+        advisorLoading: false,
+      });
+    }
+  },
+
+  adoptAdvisorSuggestion: (suggestion) => {
+    if (!suggestion) return;
+    const strat = suggestion.strategy;
+    if (strat === 'CHOOSE_A') {
+      set({ resolutionStrategy: 'lww' });
+    } else if (strat === 'CHOOSE_B') {
+      set({ resolutionStrategy: 'mvr' });
+    } else {
+      set({ resolutionStrategy: 'suture' });
+    }
+  },
+
+  resolveConflict: async (conflictId) => {
     const state = get();
-    const conflict = state.conflicts.find((c) => c.id === conflictId);
+    const conflict = state.conflicts.find((c) => c.id === conflictId || c.conflictId === conflictId);
     if (!conflict) return;
 
-    const remaining = state.conflicts.filter((c) => c.id !== conflictId);
+    const remaining = state.conflicts.filter((c) => c.id !== conflictId && c.conflictId !== conflictId);
     const resolved = [...state.resolvedConflicts, { ...conflict, resolvedAt: Date.now(), strategy: state.resolutionStrategy }];
 
-    const derived = deriveTruthfulDialState(state.replicaA, state.replicaB, remaining);
+    // Map UI strategy to backend resolution strategy
+    let mappedStrategy = 'CHOOSE_A';
+    const fieldName = conflict.field || 'title';
+    let chosenVal = conflict.branchA?.value !== undefined ? conflict.branchA.value : conflict.branchA?.[fieldName];
+
+    if (state.resolutionStrategy === 'mvr') {
+      mappedStrategy = 'CHOOSE_B';
+      chosenVal = conflict.branchB?.value !== undefined ? conflict.branchB.value : conflict.branchB?.[fieldName];
+    } else if (state.resolutionStrategy === 'suture') {
+      mappedStrategy = 'MERGE_CUSTOM';
+      const branchKey = state.sutureSelections[fieldName] || 'branchA';
+      chosenVal = branchKey === 'branchA' ? conflict.branchA?.value : conflict.branchB?.value;
+    }
+
+    const resolvedFields = { [fieldName]: chosenVal };
+
+    // Emit resolution to real backend if connected
+    if (syncClient.isConnected) {
+      try {
+        await syncClient.resolveConflict({
+          conflictId: conflict.conflictId || conflict.id,
+          entityId: conflict.entityId || conflict.taskCardId,
+          resolutionStrategy: mappedStrategy,
+          resolvedFields,
+          rememberDecision: true,
+        });
+      } catch (err) {
+        console.warn('[NexusSync] Backend conflict resolution warning:', err.message);
+      }
+    }
+
+    // Apply winning resolution to replica tasks
+    const updateTaskFn = (tasks) => tasks.map((t) => (t.id === conflict.entityId ? { ...t, ...resolvedFields, isHeld: false } : t));
+    const replicaA = { ...state.replicaA, tasks: updateTaskFn(state.replicaA.tasks) };
+    const replicaB = { ...state.replicaB, tasks: updateTaskFn(state.replicaB.tasks) };
+
+    const derived = deriveTruthfulDialState(replicaA, replicaB, remaining);
 
     set({
+      replicaA,
+      replicaB,
       conflicts: remaining,
       resolvedConflicts: resolved,
+      advisorAnalysis: null,
       ...derived,
     });
   },

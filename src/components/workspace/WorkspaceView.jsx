@@ -11,6 +11,9 @@ export function WorkspaceView() {
     replicaA,
     replicaB,
     isBrowserOnline,
+    serverConnected,
+    isLoadingWorkspace,
+    workspaceLoadError,
     toggleReplicaOnline,
     updateTaskTitle,
     appendTask,
@@ -50,7 +53,22 @@ export function WorkspaceView() {
       </div>
 
       {/* Sync Bridge */}
-      <SyncBridge totalPendingOps={totalPendingOps} isOffline={isAnyOffline} />
+      <SyncBridge totalPendingOps={totalPendingOps} isOffline={isAnyOffline} serverConnected={serverConnected} />
+
+      {/* Loading & Offline Warning States */}
+      {isLoadingWorkspace && (
+        <div className="p-3 bg-[var(--paper-sunken)] border border-[var(--border)] rounded-lg font-mono text-xs text-[var(--ink-soft)] flex items-center gap-2">
+          <span className="w-2 h-2 rounded-full bg-[var(--copper)] animate-ping" />
+          <span>Synchronizing authoritative workspace state from backend coordinator...</span>
+        </div>
+      )}
+
+      {workspaceLoadError && !serverConnected && (
+        <div className="p-3 bg-[var(--ochre)]/10 border border-[var(--ochre)]/30 rounded-lg font-mono text-xs text-[var(--ochre)] flex items-center justify-between">
+          <span>COORDINATOR OFFLINE: Operating on local-first IndexedDB journal. Reconnect to sync with SQLite server.</span>
+          <span className="text-[10px] uppercase font-bold">OFFLINE REPLICA</span>
+        </div>
+      )}
 
       {/* Two Replica Panes Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 relative items-start">

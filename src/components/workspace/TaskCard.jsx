@@ -66,7 +66,7 @@ export function TaskCard({ task, replicaKey, onTitleChange }) {
 
         <div className="flex items-center gap-1 font-mono text-[10px] text-[var(--ink-faint)] shrink-0">
           <Clock className="w-3 h-3 text-[var(--ink-faint)]" />
-          <span>Due: {task.dueDate || 'Nov 14'}</span>
+          <span>Due: {task.dueDate || 'Unset'}</span>
         </div>
       </div>
 

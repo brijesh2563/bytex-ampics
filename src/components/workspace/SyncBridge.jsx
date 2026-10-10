@@ -8,7 +8,7 @@ import { Radio, Zap } from 'lucide-react';
  * @param {number} props.totalPendingOps - Count of uncommitted local operations
  * @param {boolean} props.isOffline - Whether either replica is offline
  */
-export function SyncBridge({ totalPendingOps, isOffline }) {
+export function SyncBridge({ totalPendingOps, isOffline, serverConnected }) {
   return (
     <div className="relative mb-6 bg-[var(--paper-raised)] border border-[var(--border)] rounded-xl p-4 flex flex-col md:flex-row items-center justify-between gap-4">
       <div className="flex items-center gap-3">
@@ -57,9 +57,15 @@ export function SyncBridge({ totalPendingOps, isOffline }) {
         </div>
       </div>
 
-      <div className="font-mono text-[10px] uppercase tracking-wider text-[var(--ink-faint)] flex items-center gap-2">
-        <span>Partitions:</span>
-        <span className="text-[var(--ink)] font-semibold">A &amp; B Local IndexedDB</span>
+      <div className="font-mono text-[10px] uppercase tracking-wider text-[var(--ink-faint)] flex items-center gap-3">
+        <span className="flex items-center gap-1.5">
+          <span className={`w-1.5 h-1.5 rounded-full ${serverConnected ? 'bg-[var(--verdigris)]' : 'bg-[var(--ochre)] animate-pulse'}`} />
+          <span className={serverConnected ? 'text-[var(--verdigris)] font-semibold' : 'text-[var(--ochre)]'}>
+            {serverConnected ? 'COORDINATOR: LIVE' : 'COORDINATOR: RECONNECTING'}
+          </span>
+        </span>
+        <span className="hidden sm:inline text-[var(--line)]">|</span>
+        <span className="text-[var(--ink)] font-semibold">IndexedDB Partitions A &amp; B</span>
       </div>
     </div>
   );
