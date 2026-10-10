@@ -1,11 +1,21 @@
 import http from 'node:http';
+import { pathToFileURL } from 'node:url';
 import express, { type Express } from 'express';
 import cors from 'cors';
 import { Server as SocketIOServer } from 'socket.io';
+import type {
+  ClientToServerEvents,
+  ServerToClientEvents,
+  InterServerEvents,
+  SocketData
+} from '@nexussync/shared';
 import { config } from './config.js';
 import { initDatabase, closeDatabase } from './db/database.js';
 import { healthRouter } from './routes/health.js';
+import { workspaceRouter } from './routes/workspace.js';
 import { errorHandler, notFoundHandler } from './middleware/error-handler.js';
+import { registerSyncHandlers } from './sockets/sync-handlers.js';
+import { OperationsRepository } from './db/operations-repository.js';
 
 export function createApp(): Express {
   const app = express();
@@ -16,6 +26,7 @@ export function createApp(): Express {
 
   // Mount API routes
   app.use('/api/v1', healthRouter);
+  app.use('/api/v1', workspaceRouter);
 
   // Error handling
   app.use(notFoundHandler);
@@ -24,10 +35,11 @@ export function createApp(): Express {
   return app;
 }
 
-export function createServer(): {
+export function createServer(customRepo?: OperationsRepository): {
   app: Express;
   httpServer: http.Server;
-  io: SocketIOServer;
+  io: SocketIOServer<ClientToServerEvents, ServerToClientEvents, InterServerEvents, SocketData>;
+  repo: OperationsRepository;
 } {
   // Ensure DB initialized
   initDatabase();
@@ -35,27 +47,27 @@ export function createServer(): {
   const app = createApp();
   const httpServer = http.createServer(app);
 
-  const io = new SocketIOServer(httpServer, {
-    cors: {
-      origin: config.corsOrigin,
-      methods: ['GET', 'POST']
+  const io = new SocketIOServer<ClientToServerEvents, ServerToClientEvents, InterServerEvents, SocketData>(
+    httpServer,
+    {
+      cors: {
+        origin: config.corsOrigin,
+        methods: ['GET', 'POST']
+      }
     }
-  });
+  );
 
-  // Socket.IO lifecycle logging (event handlers will be added in upcoming steps)
-  io.on('connection', (socket) => {
-    // Basic connection tracking
-    socket.on('disconnect', () => {
-      // Cleanup on disconnect
-    });
-  });
+  const repo = customRepo || new OperationsRepository();
 
-  return { app, httpServer, io };
+  // Register real-time synchronization handlers
+  registerSyncHandlers(io, repo);
+
+  return { app, httpServer, io, repo };
 }
 
 export function startServer(): Promise<{
   httpServer: http.Server;
-  io: SocketIOServer;
+  io: SocketIOServer<ClientToServerEvents, ServerToClientEvents, InterServerEvents, SocketData>;
   port: number;
 }> {
   return new Promise((resolve, reject) => {
@@ -89,8 +101,6 @@ export function startServer(): Promise<{
   });
 }
 
-import { pathToFileURL } from 'node:url';
-
 // Start if executed directly
 if (
   process.env.NODE_ENV !== 'test' &&
@@ -106,4 +116,3 @@ if (
       process.exit(1);
     });
 }
-

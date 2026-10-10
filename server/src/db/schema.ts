@@ -20,11 +20,21 @@ CREATE TABLE IF NOT EXISTS operations (
 CREATE INDEX IF NOT EXISTS idx_operations_project_server_seq 
   ON operations(project_id, server_seq);
 
+CREATE UNIQUE INDEX IF NOT EXISTS idx_operations_project_server_seq_unique 
+  ON operations(project_id, server_seq) 
+  WHERE server_seq IS NOT NULL;
+
 CREATE INDEX IF NOT EXISTS idx_operations_op_id 
   ON operations(op_id);
 
 CREATE INDEX IF NOT EXISTS idx_operations_entity 
   ON operations(project_id, entity_id);
+
+CREATE TABLE IF NOT EXISTS project_sequences (
+  project_id TEXT PRIMARY KEY,
+  last_server_seq INTEGER NOT NULL DEFAULT 0,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
 
 CREATE TABLE IF NOT EXISTS document_snapshots (
   project_id TEXT PRIMARY KEY,
