@@ -9,7 +9,8 @@ import {
   type SyncError,
   validateHandshake,
   validateBatch,
-  validateSyncOperation
+  validateSyncOperation,
+  validateConflictResolutionPayload
 } from '@nexussync/shared';
 import { OperationsRepository } from '../db/operations-repository.js';
 
@@ -117,7 +118,7 @@ export function registerSyncHandlers(
 
       // Ingest operations transactionally
       try {
-        const { acks, committedOps } = repo.ingestBatch(targetProjectId, operations);
+        const { acks, committedOps, detectedConflicts } = repo.ingestBatch(targetProjectId, operations);
 
         // Acknowledge back to submitter
         socket.emit('server:ack-ops', { acks });
@@ -131,10 +132,95 @@ export function registerSyncHandlers(
             operations: committedOps
           });
         }
+
+        // Broadcast newly detected conflicts to the project room
+        if (detectedConflicts && detectedConflicts.length > 0) {
+          for (const conflict of detectedConflicts) {
+            io.to(getProjectRoom(targetProjectId)).emit('server:conflict-detected', { conflict });
+          }
+        }
       } catch (err) {
         const error: SyncError = {
           code: 'INGESTION_TRANSACTION_FAILED',
           message: err instanceof Error ? err.message : 'Database transaction failure during operation ingestion',
+          timestamp: new Date().toISOString()
+        };
+        socket.emit('server:error', error);
+        if (typeof callback === 'function') {
+          callback({ error });
+        }
+      }
+    });
+
+    // 3. Conflict Resolution Pipeline
+    socket.on('client:resolve-conflict', (data, callback) => {
+      const validation = validateConflictResolutionPayload(data);
+      if (!validation.valid) {
+        const error: SyncError = {
+          code: 'INVALID_RESOLUTION_PAYLOAD',
+          message: validation.error || 'Invalid resolution payload',
+          timestamp: new Date().toISOString()
+        };
+        socket.emit('server:error', error);
+        if (typeof callback === 'function') {
+          callback({ error });
+        }
+        return;
+      }
+
+      const targetProjectId = socket.data.projectId || (repo.getConflictById(data.conflictId)?.projectId);
+      if (!targetProjectId) {
+        const error: SyncError = {
+          code: 'PROJECT_NOT_IDENTIFIED',
+          message: 'Cannot determine projectId for conflict resolution',
+          timestamp: new Date().toISOString()
+        };
+        socket.emit('server:error', error);
+        if (typeof callback === 'function') {
+          callback({ error });
+        }
+        return;
+      }
+
+      const replicaId = socket.data.replicaId || 'server-resolution';
+
+      try {
+        const result = repo.resolveConflict(targetProjectId, replicaId, data);
+
+        if (result.ack.status === 'REJECTED') {
+          const error: SyncError = {
+            code: 'RESOLUTION_REJECTED',
+            message: result.ack.reason || 'Conflict resolution rejected',
+            timestamp: new Date().toISOString()
+          };
+          socket.emit('server:error', error);
+          if (typeof callback === 'function') {
+            callback({ error });
+          }
+          return;
+        }
+
+        // Acknowledge resolution back to submitter
+        if (typeof callback === 'function') {
+          callback({ ack: result.ack });
+        }
+
+        // Emit server:conflict-resolved only after the transaction commits
+        if (result.resolutionOp) {
+          const room = getProjectRoom(targetProjectId);
+          io.to(room).emit('server:conflict-resolved', {
+            conflictId: data.conflictId,
+            resolutionOp: result.resolutionOp
+          });
+          // Broadcast resolution operation so other peers update their local stores
+          socket.to(room).emit('server:broadcast-ops', {
+            operations: [result.resolutionOp]
+          });
+        }
+      } catch (err) {
+        const error: SyncError = {
+          code: 'RESOLUTION_TRANSACTION_FAILED',
+          message: err instanceof Error ? err.message : 'Database transaction failure during conflict resolution',
           timestamp: new Date().toISOString()
         };
         socket.emit('server:error', error);

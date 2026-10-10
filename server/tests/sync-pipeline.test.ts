@@ -171,4 +171,112 @@ describe('Real-Time Socket.IO Synchronization Pipeline', () => {
     expect(err).toBeDefined();
     expect(err.code).toMatch(/MALFORMED_OPERATION/);
   });
+
+  it('broadcasts server:conflict-detected on concurrent collisions and server:conflict-resolved on manual resolution', async () => {
+    // 1. Create a base task in proj-collab
+    const baseOp: SyncOperation = {
+      opId: 'op-base-task',
+      projectId: 'proj-collab',
+      entityId: 'task-realtime-cf',
+      type: 'TASK_CREATE',
+      payload: {
+        entityId: 'task-realtime-cf',
+        title: 'Realtime Conflict Task',
+        description: 'For testing socket conflict events',
+        status: 'TODO',
+        priority: 'MEDIUM',
+        dueDate: null,
+        dependencies: []
+      },
+      replicaId: 'client-1',
+      clientSeq: 2,
+      serverSeq: null,
+      lamportTime: 2,
+      versionVector: { 'client-1': 2, 'client-2': 1 },
+      timestamp: Date.now()
+    };
+
+    await new Promise<void>((resolve) => {
+      client1.emit('client:push-ops', { operations: [baseOp] }, () => resolve());
+    });
+
+    // 2. Client 1 pushes update to status
+    const op1: SyncOperation = {
+      opId: 'op-c1-status',
+      projectId: 'proj-collab',
+      entityId: 'task-realtime-cf',
+      type: 'TASK_UPDATE_FIELD',
+      payload: { entityId: 'task-realtime-cf', field: 'status', oldValue: 'TODO', newValue: 'IN_PROGRESS' },
+      replicaId: 'client-1',
+      clientSeq: 3,
+      serverSeq: null,
+      lamportTime: 3,
+      versionVector: { 'client-1': 3, 'client-2': 1 },
+      timestamp: Date.now() + 10
+    };
+    await new Promise<void>((resolve) => {
+      client1.emit('client:push-ops', { operations: [op1] }, () => resolve());
+    });
+
+    // 3. Client 2 listens for server:conflict-detected
+    const conflictDetectedPromise = new Promise<any>((resolve) => {
+      client2.once('server:conflict-detected', (data) => {
+        resolve(data);
+      });
+    });
+
+    // Client 2 pushes concurrent update to status (vector {client-1: 2, client-2: 2} is concurrent with {client-1: 3, client-2: 1})
+    const op2: SyncOperation = {
+      opId: 'op-c2-status',
+      projectId: 'proj-collab',
+      entityId: 'task-realtime-cf',
+      type: 'TASK_UPDATE_FIELD',
+      payload: { entityId: 'task-realtime-cf', field: 'status', oldValue: 'TODO', newValue: 'REVIEW' },
+      replicaId: 'client-2',
+      clientSeq: 2,
+      serverSeq: null,
+      lamportTime: 2,
+      versionVector: { 'client-1': 2, 'client-2': 2 },
+      timestamp: Date.now() + 20
+    };
+
+    client2.emit('client:push-ops', { operations: [op2] });
+
+    const conflictData = await conflictDetectedPromise;
+    expect(conflictData).toBeDefined();
+    expect(conflictData.conflict).toBeDefined();
+    expect(conflictData.conflict.type).toBe('CONCURRENT_FIELD_COLLISION');
+    expect(conflictData.conflict.field).toBe('status');
+
+    const conflictId = conflictData.conflict.conflictId;
+
+    // 4. Client 2 listens for server:conflict-resolved
+    const resolvedPromise = new Promise<any>((resolve) => {
+      client2.once('server:conflict-resolved', (data) => {
+        resolve(data);
+      });
+    });
+
+    // Client 1 manually resolves the conflict
+    const resolveAck = await new Promise<any>((resolve) => {
+      client1.emit(
+        'client:resolve-conflict',
+        {
+          conflictId,
+          entityId: 'task-realtime-cf',
+          resolutionStrategy: 'CHOOSE_A',
+          resolvedFields: { status: 'IN_PROGRESS' },
+          rememberDecision: false
+        },
+        (res: any) => resolve(res)
+      );
+    });
+
+    expect(resolveAck.ack.status).toBe('ACCEPTED');
+
+    const resolvedData = await resolvedPromise;
+    expect(resolvedData).toBeDefined();
+    expect(resolvedData.conflictId).toBe(conflictId);
+    expect(resolvedData.resolutionOp.type).toBe('CONFLICT_RESOLVE');
+  });
 });

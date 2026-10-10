@@ -34,6 +34,13 @@ const VALID_UPDATABLE_FIELDS: Set<UpdatableTaskField> = new Set([
   'dueDate'
 ]);
 
+const VALID_RESOLUTION_STRATEGIES = new Set([
+  'CHOOSE_A',
+  'CHOOSE_B',
+  'MERGE_CUSTOM',
+  'MEMORY_APPLIED'
+]);
+
 export interface ValidationResult {
   valid: boolean;
   error?: string;
@@ -251,4 +258,44 @@ export function isIdenticalOperation(op1: SyncOperation, op2: SyncOperation): bo
   }
 
   return JSON.stringify(op1.payload) === JSON.stringify(op2.payload);
+}
+
+/**
+ * Validates a conflict resolution payload.
+ */
+export function validateConflictResolutionPayload(raw: unknown): ValidationResult {
+  if (!raw || typeof raw !== 'object') {
+    return { valid: false, error: 'Resolution payload must be a non-null object' };
+  }
+
+  const data = raw as Record<string, unknown>;
+
+  if (typeof data.conflictId !== 'string' || data.conflictId.trim().length === 0 || data.conflictId.length > 128) {
+    return { valid: false, error: 'conflictId must be a non-empty string <= 128 characters' };
+  }
+
+  if (typeof data.entityId !== 'string' || data.entityId.trim().length === 0 || data.entityId.length > 128) {
+    return { valid: false, error: 'entityId must be a non-empty string <= 128 characters' };
+  }
+
+  if (typeof data.resolutionStrategy !== 'string' || !VALID_RESOLUTION_STRATEGIES.has(data.resolutionStrategy)) {
+    return { valid: false, error: `Invalid resolutionStrategy: '${String(data.resolutionStrategy)}'` };
+  }
+
+  if (!data.resolvedFields || typeof data.resolvedFields !== 'object' || Array.isArray(data.resolvedFields)) {
+    return { valid: false, error: 'resolvedFields must be a non-null object' };
+  }
+
+  const fields = data.resolvedFields as Record<string, unknown>;
+  for (const field of Object.keys(fields)) {
+    if (!VALID_UPDATABLE_FIELDS.has(field as UpdatableTaskField)) {
+      return { valid: false, error: `Field '${field}' in resolvedFields is not an updatable task field` };
+    }
+  }
+
+  if (typeof data.rememberDecision !== 'boolean') {
+    return { valid: false, error: 'rememberDecision must be a boolean' };
+  }
+
+  return { valid: true };
 }

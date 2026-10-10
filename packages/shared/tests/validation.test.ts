@@ -3,7 +3,8 @@ import {
   validateSyncOperation,
   validateHandshake,
   validateBatch,
-  isIdenticalOperation
+  isIdenticalOperation,
+  validateConflictResolutionPayload
 } from '../src/validation.js';
 import type { SyncOperation } from '../src/types.js';
 
@@ -87,5 +88,22 @@ describe('Runtime Validation Utilities', () => {
       payload: { ...validOp.payload, title: 'Completely Different Title' }
     };
     expect(isIdenticalOperation(validOp, conflictingOp)).toBe(false);
+  });
+
+  it('validates conflict resolution payloads', () => {
+    const validResolution = {
+      conflictId: 'conf-1',
+      entityId: 'task-1',
+      resolutionStrategy: 'CHOOSE_A',
+      resolvedFields: { status: 'DONE' },
+      rememberDecision: false
+    };
+    expect(validateConflictResolutionPayload(validResolution).valid).toBe(true);
+
+    const invalidStrategy = { ...validResolution, resolutionStrategy: 'INVALID_STRATEGY' };
+    expect(validateConflictResolutionPayload(invalidStrategy).valid).toBe(false);
+
+    const invalidField = { ...validResolution, resolvedFields: { notAField: 'val' } };
+    expect(validateConflictResolutionPayload(invalidField).valid).toBe(false);
   });
 });

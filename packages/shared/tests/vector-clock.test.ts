@@ -1,8 +1,11 @@
 import { describe, it, expect } from 'vitest';
 import {
   compareVectors,
+  evaluateCausality,
+  validateVectorStrict,
   dominates,
   precedes,
+  isEqual,
   isConcurrent,
   incrementVector,
   mergeVectors,
@@ -15,6 +18,8 @@ describe('Vector Clock Utility', () => {
     const v2 = { 'client-A': 2, 'client-B': 3 };
 
     expect(compareVectors(v1, v2)).toBe('IDENTICAL');
+    expect(evaluateCausality(v1, v2)).toBe('EQUAL');
+    expect(isEqual(v1, v2)).toBe(true);
     expect(dominates(v1, v2)).toBe(false);
     expect(precedes(v1, v2)).toBe(false);
     expect(isConcurrent(v1, v2)).toBe(false);
@@ -25,34 +30,38 @@ describe('Vector Clock Utility', () => {
     const v2 = { 'client-A': 2 };
 
     expect(compareVectors(v1, v2)).toBe('IDENTICAL');
+    expect(evaluateCausality(v1, v2)).toBe('EQUAL');
   });
 
-  it('should identify when v1 dominates v2', () => {
+  it('should identify when v1 dominates v2 (AFTER)', () => {
     const v1 = { 'client-A': 3, 'client-B': 4 };
     const v2 = { 'client-A': 2, 'client-B': 4 };
 
     expect(compareVectors(v1, v2)).toBe('DOMINATES');
+    expect(evaluateCausality(v1, v2)).toBe('AFTER');
     expect(dominates(v1, v2)).toBe(true);
     expect(precedes(v1, v2)).toBe(false);
     expect(isConcurrent(v1, v2)).toBe(false);
   });
 
-  it('should identify when v1 precedes v2', () => {
+  it('should identify when v1 precedes v2 (BEFORE)', () => {
     const v1 = { 'client-A': 1, 'client-B': 2 };
     const v2 = { 'client-A': 2, 'client-B': 2 };
 
     expect(compareVectors(v1, v2)).toBe('PRECEDES');
+    expect(evaluateCausality(v1, v2)).toBe('BEFORE');
     expect(dominates(v1, v2)).toBe(false);
     expect(precedes(v1, v2)).toBe(true);
     expect(isConcurrent(v1, v2)).toBe(false);
   });
 
-  it('should identify concurrent vectors (cross-branch edits)', () => {
+  it('should identify concurrent vectors (CONCURRENT)', () => {
     // Client-A made an edit without knowing Client-B's edit
     const v1 = { 'client-A': 2, 'client-B': 1 };
     const v2 = { 'client-A': 1, 'client-B': 2 };
 
     expect(compareVectors(v1, v2)).toBe('CONCURRENT');
+    expect(evaluateCausality(v1, v2)).toBe('CONCURRENT');
     expect(dominates(v1, v2)).toBe(false);
     expect(precedes(v1, v2)).toBe(false);
     expect(isConcurrent(v1, v2)).toBe(true);
@@ -63,7 +72,16 @@ describe('Vector Clock Utility', () => {
     const v2 = { 'client-B': 1 };
 
     expect(compareVectors(v1, v2)).toBe('CONCURRENT');
+    expect(evaluateCausality(v1, v2)).toBe('CONCURRENT');
     expect(isConcurrent(v1, v2)).toBe(true);
+  });
+
+  it('should reject invalid vector counters strictly', () => {
+    expect(() => validateVectorStrict(null)).toThrow(/non-null object/);
+    expect(() => validateVectorStrict({ 'client-A': -1 })).toThrow(/finite, non-negative integer/);
+    expect(() => validateVectorStrict({ 'client-A': 1.5 })).toThrow(/finite, non-negative integer/);
+    expect(() => validateVectorStrict({ 'client-A': Infinity })).toThrow(/finite, non-negative integer/);
+    expect(() => validateVectorStrict({ '': 1 })).toThrow(/non-empty string/);
   });
 
   it('should immutably increment replica sequence', () => {
