@@ -15,8 +15,13 @@
     "test:all": "npm --prefix packages/shared test && npm --prefix server test"
   },
   "dependencies": {
+    "idb": "^8.0.4",
+    "lenis": "^1.3.26",
+    "lucide-react": "^1.54.0",
     "react": "^19.2.8",
-    "react-dom": "^19.2.8"
+    "react-dom": "^19.2.8",
+    "socket.io-client": "^4.8.4",
+    "zustand": "^5.0.15"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
