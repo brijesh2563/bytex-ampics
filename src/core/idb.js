@@ -10,6 +10,7 @@ const DB_VERSION = 1;
  * - 'pending_ops': unacknowledged operations queued locally while offline or awaiting sync
  * - 'sync_meta': replica sync metadata (lastKnownServerSeq, lamportClock)
  */
+
 export async function getDB() {
   return openDB(DB_NAME, DB_VERSION, {
     upgrade(db) {

@@ -120,8 +120,100 @@ export const useSyncStore = create((set, get) => ({
     pendingOps: [],
   },
 
+  // Active Page Navigation
+  activePage: typeof window !== 'undefined' && window.location.hash
+    ? window.location.hash.replace('#', '') || 'observatory'
+    : 'observatory',
+
+  // Observatory Theme (light / dark)
+  theme: typeof localStorage !== 'undefined' && localStorage.getItem('nexussync_theme') === 'dark'
+    ? 'dark'
+    : 'light',
+
+  // Operator Auth & Session State (Truthful Local Demo Enclave)
+  user: {
+    id: 'op_aarav',
+    name: 'Aarav Sharma',
+    email: 'aarav@nexussync.org',
+    role: 'CHIEF OPERATOR',
+    replicaId: 'r_aarav-lap',
+    region: 'ap-northeast-1 (Tokyo)',
+    isAdmin: true,
+    accessLevel: 'TIER-0 ARBITER',
+    authMode: 'LOCAL / DEMO',
+    sessionType: 'LOCAL OPERATOR',
+    ed25519Fingerprint: '7F8C·914B·22D1·D91A',
+    isAuthenticated: true,
+  },
+
   // Active Conflicts
-  conflicts: [],
+  conflicts: [
+    {
+      id: 'conf_204',
+      taskCardId: 'card-2',
+      title: 'Produce 200 physical observatory badges',
+      lcaHash: '7bf812c',
+      deltaSize: '1.42 KB',
+      lamportTicks: 2841,
+      base: {
+        version: 'v12 · LCA',
+        clock: '[10, 10]',
+        title: 'Produce 200 physical observatory badges',
+        dueDate: 'Nov 01, 2026',
+        assignee: 'Aarav Sharma',
+        priority: 'NORMAL',
+        blockingDep: 'Root #101',
+      },
+      branchA: {
+        replica: 'Replica A (Aarav / r_aarav-lap)',
+        version: 'v14 · Fork A',
+        clock: '[12, 10]',
+        dueDate: 'Nov 04, 2026',
+        priority: 'HIGH',
+        assignee: 'Aarav Sharma',
+        blockingDep: 'Root #101',
+      },
+      branchB: {
+        replica: 'Replica B (Meera / r_meera-ph)',
+        version: 'v14 · Fork B',
+        clock: '[10, 13]',
+        dueDate: 'Nov 19, 2026',
+        priority: 'NORMAL',
+        assignee: 'Meera Patel',
+        blockingDep: 'Unlinked Block #205',
+      },
+    },
+  ],
+
+  // Conflict Resolver Interactive State
+  resolutionStrategy: 'lww', // 'lww' | 'mvr' | 'suture'
+  sutureSelections: {
+    dueDate: 'branchA',
+    priority: 'branchA',
+    assignee: 'branchB',
+    blockingDep: 'branchA',
+  },
+  resolvedConflicts: [],
+
+  // Convergence Lab & Chaos Simulator State
+  chaosEngaged: true,
+  networkDriftMs: 320,
+  chaosFlags: {
+    dropPackets: true,
+    duplicateOps: true,
+    outOfOrder: true,
+    asymmetricPartition: false,
+  },
+  chaosEvents: [
+    { id: 'ev-1', time: '12:04:18', type: 'PACKET_DELAY', desc: 'Synthetic 320ms drift injected on Tokyo-London hop', lamport: 14820 },
+    { id: 'ev-2', time: '12:05:02', type: 'PACKET_DROP', desc: 'Simulated stochastic link sever (25% loss) on Zurich ingress', lamport: 14825 },
+    { id: 'ev-3', time: '12:06:45', type: 'DUPLICATE_OP', desc: 'Ghost duplicate echo [op_7Kq2x] ingested and discarded by idempotent LWW register', lamport: 14829 },
+  ],
+
+  // Vector Timeline Scrubber State
+  timelineEpoch: 14,
+  selectedOpId: 'op_7Kq2x',
+  isPlayingTimeline: false,
 
   // Truthful Dial Parameters
   dialState: 'SYNCED',
@@ -349,6 +441,200 @@ export const useSyncStore = create((set, get) => ({
     } catch (err) {
       console.error('Failed to append task in IndexedDB:', err);
     }
+  },
+
+  // --------------------------------------------------------------------------
+  // Navigation & Page Switching
+  // --------------------------------------------------------------------------
+  setActivePage: (page) => {
+    if (typeof window !== 'undefined') {
+      window.location.hash = page;
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+    set({ activePage: page });
+  },
+
+  // --------------------------------------------------------------------------
+  // Theme Switching (Observatory Light & Dark Astrolabe)
+  // --------------------------------------------------------------------------
+  setTheme: (theme) => {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem('nexussync_theme', theme);
+    }
+    if (typeof document !== 'undefined') {
+      document.documentElement.setAttribute('data-theme', theme);
+      if (theme === 'dark') {
+        document.documentElement.classList.add('dark');
+      } else {
+        document.documentElement.classList.remove('dark');
+      }
+    }
+    set({ theme });
+  },
+
+  toggleTheme: () => {
+    const nextTheme = get().theme === 'dark' ? 'light' : 'dark';
+    get().setTheme(nextTheme);
+  },
+
+  // --------------------------------------------------------------------------
+  // Operator Auth & Session (Isolated Demo Adapter Store)
+  // --------------------------------------------------------------------------
+  login: (userData) => {
+    const isChief = (userData.role || '').toUpperCase().includes('CHIEF') ||
+                    (userData.role || '').toUpperCase().includes('ARBITER') ||
+                    userData.isAdmin === true;
+    set({
+      user: {
+        id: userData.id || 'op_custom',
+        name: userData.name || 'Station Operator',
+        email: userData.email || 'operator@nexussync.org',
+        role: userData.role || (isChief ? 'CHIEF OPERATOR' : 'PEER OPERATOR'),
+        replicaId: userData.replicaId || 'r_operator_primary',
+        region: userData.region || 'local-isolated (Enclave)',
+        isAdmin: isChief,
+        accessLevel: isChief ? 'TIER-0 ARBITER' : 'PEER QUORUM',
+        authMode: 'LOCAL / DEMO',
+        sessionType: 'LOCAL OPERATOR',
+        ed25519Fingerprint: userData.ed25519Fingerprint || '7F8C·914B·22D1·D91A',
+        isAuthenticated: true,
+        sessionStartedAt: Date.now(),
+      },
+    });
+  },
+
+  signup: (userData) => {
+    get().login(userData);
+  },
+
+  logout: () => {
+    set({
+      user: null,
+    });
+  },
+
+  elevateToAdmin: () => {
+    set((state) => {
+      if (!state.user) return state;
+      return {
+        user: {
+          ...state.user,
+          isAdmin: true,
+          role: 'CHIEF OPERATOR',
+          accessLevel: 'TIER-0 ARBITER',
+        },
+      };
+    });
+  },
+
+  // --------------------------------------------------------------------------
+  // Conflict Resolver Actions
+  // --------------------------------------------------------------------------
+  setResolutionStrategy: (strategy) => {
+    set({ resolutionStrategy: strategy });
+  },
+
+  setSutureSelection: (field, branch) => {
+    set((state) => ({
+      sutureSelections: {
+        ...state.sutureSelections,
+        [field]: branch,
+      },
+    }));
+  },
+
+  resolveConflict: (conflictId) => {
+    const state = get();
+    const conflict = state.conflicts.find((c) => c.id === conflictId);
+    if (!conflict) return;
+
+    const remaining = state.conflicts.filter((c) => c.id !== conflictId);
+    const resolved = [...state.resolvedConflicts, { ...conflict, resolvedAt: Date.now(), strategy: state.resolutionStrategy }];
+
+    const derived = deriveTruthfulDialState(state.replicaA, state.replicaB, remaining);
+
+    set({
+      conflicts: remaining,
+      resolvedConflicts: resolved,
+      ...derived,
+    });
+  },
+
+  // --------------------------------------------------------------------------
+  // Convergence Lab & Chaos Simulator Actions
+  // --------------------------------------------------------------------------
+  setNetworkDriftMs: (ms) => {
+    set((state) => ({
+      networkDriftMs: ms,
+      chaosEvents: [
+        {
+          id: `ev-${Date.now()}`,
+          time: new Date().toLocaleTimeString(),
+          type: 'LATENCY_DRIFT',
+          desc: `Drift adjusted to ${ms}ms across mesh transport`,
+          lamport: 14830 + Math.floor(Math.random() * 20),
+        },
+        ...state.chaosEvents.slice(0, 15),
+      ],
+    }));
+  },
+
+  toggleChaosFlag: (flagKey) => {
+    set((state) => {
+      const current = state.chaosFlags[flagKey];
+      const nextFlags = { ...state.chaosFlags, [flagKey]: !current };
+      const eventName = (!current ? 'ENGAGED: ' : 'DISENGAGED: ') + flagKey;
+      return {
+        chaosFlags: nextFlags,
+        chaosEvents: [
+          {
+            id: `ev-${Date.now()}`,
+            time: new Date().toLocaleTimeString(),
+            type: 'FLAG_TOGGLE',
+            desc: eventName,
+            lamport: 14830 + Math.floor(Math.random() * 20),
+          },
+          ...state.chaosEvents.slice(0, 15),
+        ],
+      };
+    });
+  },
+
+  triggerCatastrophe: (type) => {
+    const time = new Date().toLocaleTimeString();
+    let desc = '';
+    if (type === 'duplicate_storm') desc = 'Synthetic Duplicate Storm (10k ops) flooded through mesh';
+    else if (type === 'split_brain') desc = 'Bipartite split-brain partition severed Tokyo & London';
+    else if (type === 'reorder_cascade') desc = 'Entropy shuffling of Lamport vectors triggered';
+    else desc = `Scenario ${type} triggered`;
+
+    set((state) => ({
+      chaosEvents: [
+        {
+          id: `ev-${Date.now()}`,
+          time,
+          type: 'CATASTROPHE',
+          desc,
+          lamport: 14850 + Math.floor(Math.random() * 50),
+        },
+        ...state.chaosEvents.slice(0, 15),
+      ],
+    }));
+  },
+
+  // --------------------------------------------------------------------------
+  // Vector Timeline Scrubber Actions
+  // --------------------------------------------------------------------------
+  setTimelineEpoch: (epoch) => {
+    set({ timelineEpoch: Math.max(0, Math.min(14, epoch)) });
+  },
+
+  setSelectedOpId: (opId) => {
+    set({ selectedOpId: opId });
+  },
+
+  setIsPlayingTimeline: (isPlaying) => {
+    set({ isPlayingTimeline: isPlaying });
   },
 
   // --------------------------------------------------------------------------
